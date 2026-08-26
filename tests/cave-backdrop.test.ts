@@ -7,7 +7,13 @@
  */
 import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { BG_Z, FRUSTUM_HEIGHT, GAMEPLAY_Z, createBackdrop } from '../src/render'
+import {
+  BG_Z,
+  FRUSTUM_HEIGHT,
+  GAMEPLAY_Z,
+  createBackdrop,
+  createCaveBackdrop as createCaveBackdropFromIndex,
+} from '../src/render'
 import { createCaveBackdrop } from '../src/render/cave-backdrop.ts'
 
 /**
@@ -337,5 +343,14 @@ describe('cave backdrop cost', () => {
     for (const child of cave.children) {
       expect(child.userData['aabb']).toBeUndefined()
     }
+  })
+})
+
+describe('the cave backdrop, as src/render publishes it', () => {
+  test('is re-exported beside createBackdrop, and is not that function', () => {
+    // T-055 imports it from '../src/render', the way every other render factory is reached.
+    expect(typeof createCaveBackdropFromIndex).toBe('function')
+    expect(createCaveBackdropFromIndex).toBe(createCaveBackdrop)
+    expect(createCaveBackdropFromIndex).not.toBe(createBackdrop)
   })
 })
