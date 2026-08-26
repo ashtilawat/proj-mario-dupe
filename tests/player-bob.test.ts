@@ -253,9 +253,30 @@ describe('the bob is active only when grounded and walking', () => {
     expect(player.grounded).toBe(true)
     expect(Math.abs(player.body.velocity.x)).toBeLessThan(BOB_MIN_SPEED)
 
-    // Intent is still held. Gating on intent instead of speed would bob here forever.
+    // Intent is still held and the hitbox is still against the wall, so a bob here would be
+    // jogging on the spot with no ground covered.
     for (let i = 0; i < 60; i += 1) {
       player.step(FIXED_DT, pushing)
+      expect(bobLift(player)).toBe(0)
+    }
+  })
+
+  test('a sub-threshold analog creep slides instead of jogging on the spot', () => {
+    // This is where "grounded and moving" is decided by SPEED rather than by intent. A gentle
+    // analog push settles below BOB_MIN_SPEED and must slide silently. Gating on intent
+    // instead — or lowering BOB_MIN_SPEED towards zero — turns this into a permanent micro
+    // jitter. The wall test above cannot see either mistake: at a wall the sweep has zeroed
+    // vx, so the speed-scaled amplitude is zero whichever gate is in use.
+    const player = onGround()
+    const creep = input({ moveX: 0.06, right: true })
+
+    stepFor(player, 60, creep)
+    const speed = Math.abs(player.body.velocity.x)
+    expect(speed).toBeGreaterThan(0)
+    expect(speed).toBeLessThan(BOB_MIN_SPEED)
+
+    for (let i = 0; i < 400; i += 1) {
+      player.step(FIXED_DT, creep)
       expect(bobLift(player)).toBe(0)
     }
   })
