@@ -182,7 +182,8 @@ describe('stomping a walker', () => {
   test('does not stomp a walker the player is rising into', () => {
     const { game } = start()
     const walker = game.walkers[0]!
-    // Overlapping the walker from below, moving up: a stomp must need a downward fall.
+    // Proves a player moving upward while overlapping the walker is not stomped,
+    // regardless of which internal check inside tryStomp is what rejects it.
     game.player.body.aabb.x = 16.2
     game.player.body.aabb.y = 1.5
     game.player.body.velocity.y = 6

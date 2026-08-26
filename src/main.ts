@@ -268,8 +268,15 @@ export function startGame(
 
       // A stomp is the walker's call: it checks the fall direction and the overlap, then
       // hands back the bounce to spend. Defeated walkers just stop being drawn.
+      //
+      // The fall velocity is read once, before the loop, rather than off player.body
+      // inside it: every walker under the player this tick was stomped by the same
+      // fall, and the first bounce would otherwise overwrite velocity.y with a
+      // positive value, masking every later walker's stomp behind its own
+      // stomperVy >= 0 guard — making the outcome depend on walker array order.
+      const fallVy = player.body.velocity.y
       for (const walker of walkers) {
-        const bounce = walker.tryStomp(player.body.aabb, player.body.velocity.y, prevBottom)
+        const bounce = walker.tryStomp(player.body.aabb, fallVy, prevBottom)
         if (bounce === 0) continue
         player.body.velocity.y = bounce
         walker.mesh.visible = false
