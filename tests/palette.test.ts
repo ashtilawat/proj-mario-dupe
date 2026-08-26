@@ -19,10 +19,16 @@ function isGray(hex: number): boolean {
   return r === g && g === b
 }
 
-/** A hand-built grid so classification is tested on stacked tiles the real 1-1 lacks. */
-function stubGrid(solids: Array<[number, number]>): Pick<TileGrid, 'getTile'> {
+/**
+ * A hand-built grid so classification is tested on stacked tiles the real 1-1 lacks.
+ * A full TileGrid, not just getTile, so createTileMesh can be driven by it too.
+ */
+function stubGrid(solids: Array<[number, number]>, width = 4, height = 4): TileGrid {
   const keys = new Set(solids.map(([tx, ty]) => `${tx},${ty}`))
   return {
+    width,
+    height,
+    tileSize: 1,
     getTile(tx: number, ty: number): TileKind {
       return keys.has(`${tx},${ty}`) ? 'solid' : 'empty'
     },
@@ -78,11 +84,18 @@ describe('tileColorAt', () => {
     expect(tileColorAt(grid, 3, 1)).toBe(GRASS_TOP_COLOR)
   })
 
-  test('the top row is grass — out of bounds above reads as empty', () => {
+  test('a solid tile on the top row is grass — out of bounds above reads as empty', () => {
+    const grid = stubGrid([[1, 3]], 4, 4)
+
+    expect(grid.getTile(1, 3)).toBe('solid')
+    expect(grid.getTile(1, 4)).toBe('empty')
+    expect(tileColorAt(grid, 1, 3)).toBe(GRASS_TOP_COLOR)
+  })
+
+  test('the real level grid also reports out of bounds as empty', () => {
     const grid = createTileGridFromLevel('1-1')
 
-    expect(grid.getTile(0, grid.height - 1)).toBe('empty')
-    expect(tileColorAt(grid, 0, grid.height - 1)).toBe(GRASS_TOP_COLOR)
+    expect(grid.getTile(0, grid.height)).toBe('empty')
   })
 })
 
@@ -139,6 +152,42 @@ describe('createTileMesh instance colors', () => {
       mesh.getColorAt(i, actual)
       expect(actual.getHex()).toBe(grass.getHex())
     }
+  })
+
+  test('a stacked column comes out dirt under grass, in instance order', () => {
+    // Deliberately asymmetric: a 3-tall column at tx=1 plus a lone tile at tx=3. Swapping
+    // tx/ty in the tileColorAt call, or dropping the call entirely, changes this sequence.
+    const grid = stubGrid(
+      [
+        [1, 0],
+        [1, 1],
+        [1, 2],
+        [3, 0],
+      ],
+      4,
+      4,
+    )
+    const mesh = createTileMesh(grid)
+
+    // createTileMesh walks ty outer, tx inner:
+    //   ty=0 -> (1,0) buried, (3,0) exposed;  ty=1 -> (1,1) buried;  ty=2 -> (1,2) exposed.
+    const expected = [DIRT_COLOR, GRASS_TOP_COLOR, DIRT_COLOR, GRASS_TOP_COLOR]
+    expect(mesh.count).toBe(expected.length)
+
+    const actual = new THREE.Color()
+    const got: number[] = []
+    for (let i = 0; i < mesh.count; i += 1) {
+      mesh.getColorAt(i, actual)
+      got.push(actual.getHex())
+    }
+    expect(got).toEqual(expected)
+  })
+
+  test('a grid with no solid tiles produces an empty batch and no instance colors', () => {
+    const mesh = createTileMesh(stubGrid([], 4, 4))
+
+    expect(mesh.count).toBe(0)
+    expect(mesh.instanceColor).toBeNull()
   })
 
   test('stays a single InstancedMesh', () => {

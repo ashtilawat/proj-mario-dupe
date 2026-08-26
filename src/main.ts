@@ -348,6 +348,9 @@ export function startGame(
       hud.unmount()
       tiles.geometry.dispose()
       ;(tiles.material as THREE.Material).dispose()
+      // Also releases the instanceMatrix and instanceColor buffers: three drops those from
+      // its attribute cache on the InstancedMesh dispose event, not on the material's.
+      tiles.dispose()
       tiles.removeFromParent()
       for (const walker of walkers) {
         walker.mesh.geometry.dispose()

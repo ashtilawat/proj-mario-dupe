@@ -40,8 +40,8 @@ export const DIRT_COLOR = 0x8b5a2b
 
 /**
  * Which palette entry a solid tile is drawn in. Grass is the default and dirt is the
- * exception, so an out-of-bounds cell above — which every {@link TileGrid} reports as
- * `empty` — falls through to grass without a special case. Only the cell above matters;
+ * exception, so a top-row tile falls through to grass without a special case — the grids
+ * this game builds report out-of-bounds cells as `empty`. Only the cell above matters;
  * this is a per-tile lookup, not a scan.
  */
 export function tileColorAt(grid: Pick<TileGrid, 'getTile'>, tx: number, ty: number): number {
