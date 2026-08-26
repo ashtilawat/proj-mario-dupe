@@ -179,6 +179,29 @@ describe('the bob is active only when grounded and walking', () => {
     expect(airborneFrames).toBeGreaterThan(10)
   })
 
+  test('the bob fades out over several frames on takeoff instead of popping', () => {
+    const player = onGround()
+    stepFor(player, 60, input({ moveX: 1, right: true }))
+    expect(bobLift(player)).toBeGreaterThan(0)
+
+    const held = input({ moveX: 1, right: true, jump: true })
+    player.step(FIXED_DT, held)
+    expect(player.grounded).toBe(false)
+
+    // Count the airborne frames still carrying lift. moveToward sheds BOB_FADE_RATE per
+    // second, so a full amplitude needs about 12 frames at 120 Hz. Assigning targetAmp
+    // straight to bobAmp would zero it in a single frame and snap the mesh down the whole
+    // lift at once — the exact pop the fade exists to prevent.
+    let fadingFrames = 0
+    while (!player.grounded && bobLift(player) > 0) {
+      player.step(FIXED_DT, held)
+      fadingFrames += 1
+    }
+
+    expect(fadingFrames).toBeGreaterThan(4)
+    expect(fadingFrames).toBeLessThanOrEqual(Math.ceil(BOB_AMPLITUDE / BOB_FADE_RATE / FIXED_DT) + 1)
+  })
+
   test('walking off a ledge stops bobbing instead of bouncing through the fall', () => {
     const LEDGE = makeGrid([
       '................',
@@ -318,7 +341,7 @@ describe('the bob is phased on distance, not on the clock', () => {
       expect(bobLift(player)).toBeLessThanOrEqual(BOB_AMPLITUDE + Number.EPSILON * Math.abs(player.mesh.position.y))
     }
 
-    expect(peak).toBeCloseTo(BOB_AMPLITUDE, 2)
+    expect(peak).toBeCloseTo(BOB_AMPLITUDE, 3)
   })
 })
 

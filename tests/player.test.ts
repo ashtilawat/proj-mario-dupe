@@ -327,7 +327,9 @@ describe('player hitbox', () => {
     // Y is the centre plus the bob, which is bounded and never dips below the rest pose.
     const lift = player.mesh.position.y - (player.body.aabb.y + PLAYER_HEIGHT / 2)
     expect(lift).toBeGreaterThanOrEqual(0)
-    expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE)
+    // lift is recovered by subtracting the hitbox centre off an already-rounded sum
+    // (mesh.position.y is IEEE 754 float64), so it can sit one ULP above the cap.
+    expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE + Number.EPSILON * Math.abs(player.mesh.position.y))
   })
 })
 
