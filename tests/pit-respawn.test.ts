@@ -1,0 +1,79 @@
+import { afterEach, describe, expect, test } from 'vitest'
+import * as THREE from 'three'
+import { startGame, type Game } from '../src/main'
+import { loadLevel } from '../src/levels/index.ts'
+
+/** jsdom ships no WebGL; every test drives the real wiring through this stub. */
+function stubRenderer() {
+  const renderer = {
+    domElement: document.createElement('canvas'),
+    setSize() {},
+    setPixelRatio() {},
+    render() {},
+    dispose() {},
+  }
+  return renderer
+}
+
+let started: Game | null = null
+
+function start(size = { width: 800, height: 400 }) {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const game = startGame(
+    container,
+    () => stubRenderer() as unknown as THREE.WebGLRenderer,
+    size,
+  )
+  started = game
+  return { container, game }
+}
+
+afterEach(() => {
+  started?.dispose()
+  started = null
+  document.body.replaceChildren()
+})
+
+describe('falling into a pit', () => {
+  test('costs a life and respawns the player at the level spawn', () => {
+    const { game } = start()
+    const [spawnX, spawnY] = loadLevel('1-1').spawn
+    expect(game.hud.getState().lives).toBe(3)
+
+    // Drop the body clear of the level, still moving, as a real pit fall would.
+    game.player.body.aabb.y = -10
+    game.player.body.velocity.x = 3
+    game.player.body.velocity.y = -12
+
+    game.loop.tick(1 / 60)
+
+    expect(game.hud.getState().lives).toBe(2)
+    expect(game.player.body.aabb.x).toBeCloseTo(spawnX, 5)
+    expect(game.player.body.aabb.y).toBeCloseTo(spawnY, 5)
+    expect(game.player.body.velocity.x).toBe(0)
+    expect(game.player.body.velocity.y).toBe(0)
+  })
+
+  test('keeps following the respawned player with the camera', () => {
+    const { game } = start()
+    const [spawnX] = loadLevel('1-1').spawn
+
+    game.player.body.aabb.x = 20
+    game.player.body.aabb.y = -10
+    game.loop.tick(1 / 60)
+
+    const halfWidth = (game.app.camera.right - game.app.camera.left) / 2
+    const centerX = spawnX + game.player.body.aabb.w / 2
+    expect(game.app.camera.position.x).toBeCloseTo(Math.max(centerX, halfWidth), 5)
+  })
+
+  test('does not cost a life while the player idles on the floor', () => {
+    const { game } = start()
+
+    for (let i = 0; i < 60; i++) game.loop.tick(1 / 60)
+
+    expect(game.hud.getState().lives).toBe(3)
+    expect(game.player.grounded).toBe(true)
+  })
+})

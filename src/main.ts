@@ -219,6 +219,17 @@ export function startGame(
     input,
     simulate(dt, state) {
       player.step(dt, dash.poll(state))
+
+      // Fell out of the level: nothing below y=0 can ever catch the body, so the fall
+      // costs a life and puts the player back on the level spawn at rest.
+      const aabb = player.body.aabb
+      if (aabb.y + aabb.h < 0) {
+        hud.setLives(hud.getState().lives - 1)
+        aabb.x = spawnX
+        aabb.y = spawnY
+        player.body.velocity.x = 0
+        player.body.velocity.y = 0
+      }
     },
     render() {
       followPlayer(camera, player, grid)
