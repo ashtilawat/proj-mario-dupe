@@ -9,6 +9,8 @@ import { createCoin } from './entities/pickups/index.ts'
 import type { Coin } from './entities/pickups/index.ts'
 import { createBossStandin } from './entities/bosses/standin.ts'
 import type { BossFacing, BossStandin } from './entities/bosses/standin.ts'
+import { createFlag } from './entities/goal/index.ts'
+import type { Flag } from './entities/goal/index.ts'
 import { playSfx } from './audio/index.ts'
 import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
@@ -287,6 +289,28 @@ export function createFlags(level: Level): Aabb[] {
 }
 
 /**
+ * Art for the flags the run loop already collides against. Built from the AABBs
+ * {@link createFlags} returned rather than from a second pass over the level entities, so a
+ * pole can never end up standing on a tile the hitbox is not on.
+ */
+export function createFlagArt(flags: readonly Aabb[]): Flag[] {
+  return flags.map((flag, index) => createFlag({ x: flag.x, y: flag.y, id: index }))
+}
+
+/**
+ * One parent for every flag mesh, scaled for the same reason {@link createWalkerLayer} is:
+ * flag art is authored in world units (TILE_SIZE per tile) while this game draws one world
+ * unit per tile.
+ */
+export function createFlagLayer(art: Flag[]): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'flags'
+  group.scale.setScalar(1 / TILE_SIZE)
+  for (const flag of art) group.add(flag.mesh)
+  return group
+}
+
+/**
  * Where each level's flag leads. A level with no entry — the castle at the end of World 1,
  * or anything the level loader does not know yet — finishes the run instead.
  */
@@ -437,9 +461,12 @@ export function startGame(
   const walkers: Walker[] = []
   const coins: Coin[] = []
   const bosses: BossStandin[] = []
+  // Art only. `flags` above stays the one array the run loop tests overlaps against.
+  const flagArt: Flag[] = []
   const walkerLayer = createWalkerLayer(walkers)
   const coinLayer = createCoinLayer(coins)
   const bossLayer = createBossLayer(bosses)
+  const flagLayer = createFlagLayer(flagArt)
   scene.add(
     directional,
     hemisphere,
@@ -447,6 +474,7 @@ export function startGame(
     walkerLayer,
     coinLayer,
     bossLayer,
+    flagLayer,
     overlay.group,
   )
 
@@ -587,6 +615,13 @@ export function startGame(
     for (const boss of bosses) bossLayer.add(boss.mesh)
 
     flags = createFlags(level)
+    // Flag art follows the same dispose-splice-rehang shape, one step behind the hitboxes
+    // it is built from. `Flag.dispose` unparents itself, so the layer is empty by the end
+    // of the first loop.
+    for (const flag of flagArt) flag.dispose()
+    flagArt.splice(0, flagArt.length, ...createFlagArt(flags))
+    for (const flag of flagArt) flagLayer.add(flag.mesh)
+
     spawnX = level.spawn[0]
     spawnY = level.spawn[1]
     checkpointX = level.checkpoint[0]
@@ -890,9 +925,11 @@ export function startGame(
         boss.mesh.geometry.dispose()
         boss.mesh.material.dispose()
       }
+      for (const flag of flagArt) flag.dispose()
       walkerLayer.removeFromParent()
       coinLayer.removeFromParent()
       bossLayer.removeFromParent()
+      flagLayer.removeFromParent()
       app.dispose()
     },
   }
