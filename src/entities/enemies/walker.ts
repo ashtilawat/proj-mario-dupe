@@ -1,7 +1,7 @@
 // T-006 — M0 walker enemy: the one and only enemy class for this milestone.
 //
 // Units: the hitbox is a 2D AABB in TILE space (1 tile = 1.0, bottom-left origin, Y up so
-// vy < 0 is falling). The mushroom mesh (T-030) is purely cosmetic and lives in WORLD units,
+// vy < 0 is falling). The toadstool mesh (T-060) is purely cosmetic and lives in WORLD units,
 // where TILE_SIZE world units make one tile; the mesh bounds are deliberately decoupled from
 // the hitbox so art can change without touching gameplay.
 
@@ -37,30 +37,85 @@ export const WALKER_PATROL_SPEED = WALK_MAX / 3
 export const WALKER_WIDTH = 1
 export const WALKER_HEIGHT = 1
 
-/** Mushroom colours, applied per vertex so one material draws both parts. */
+/** Mushroom colours, applied per vertex so one material draws all three parts. */
 const WALKER_CAP_COLOR = 0xc4362f
 const WALKER_STEM_COLOR = 0xf2e2c4
+/**
+ * The spots carry their own hex rather than reusing the stem's cream. `paint` flat-fills
+ * per part, so a shared colour would fold the spots into the stem — and brighter than the
+ * stem is also what makes them read against the red, the way the king's crown points sit
+ * a shade above his band.
+ */
+const WALKER_SPOT_COLOR = 0xfff4e0
 
 /**
- * Cap and stem, in tiles, as local offsets from the mesh centre. MESH_SPAN is the art's
+ * The toadstool, in tiles, as local offsets from the mesh centre. MESH_SPAN is the art's
  * own silhouette size, deliberately NOT the WALKER_HEIGHT hitbox constant, so retuning the
- * hitbox cannot squash the mushroom. The two parts together span exactly the 1x1x1 tile the
- * gray box used to, so framing does not shift, and they overlap by NECK_OVERLAP at the join
- * so the seam cannot open or z-fight.
+ * hitbox cannot squash the mushroom.
+ *
+ * A round cap cannot kiss the corners of its tile, so the art stays INSIDE the 1x1x1 tile
+ * the gray box used to fill rather than filling it. One measurement must stay exact
+ * regardless: the stem's foot sits at -MESH_SPAN / 2, which is where `syncMesh` centring
+ * the mesh on a one-tile AABB puts the walker's feet on the floor.
  */
 const MESH_SPAN = 1
-const CAP_WIDTH = 1
-const CAP_HEIGHT = 0.45
-const CAP_DEPTH = 1
-const STEM_WIDTH = 0.55
-const STEM_DEPTH = 0.55
-const NECK_OVERLAP = 0.05
+
+/** Cap: a quarter-ellipse of this half-width and height, revolved into a bell. */
+const CAP_RADIUS = 0.46
+const CAP_HEIGHT = 0.32
+/** The rim's height, so the dome runs from CAP_RIM_Y up to CAP_RIM_Y + CAP_HEIGHT. */
+const CAP_RIM_Y = 0.1
+/** 20 segments divide the turn into 18 degrees, so a vertex lands on the cap's widest
+ * point and the silhouette's half-width is CAP_RADIUS rather than a segment artefact. */
+const CAP_RADIAL_SEGMENTS = 20
+/** Profile samples from rim to apex; eight loses the facets at the size this is drawn. */
+const CAP_PROFILE_STEPS = 8
+
+const STEM_TOP_RADIUS = 0.15
+/** Wider at the foot than the top, so the stem plants rather than floats. */
+const STEM_FOOT_RADIUS = 0.19
+/** 16 segments divide the turn into 22.5 degrees, exact at 90 like the cap's 20. */
+const STEM_RADIAL_SEGMENTS = 16
+/** How far the stem's top pushes up inside the cap so the join cannot open or z-fight. */
+const NECK_OVERLAP = 0.04
+
+/** A paper dot on the cap: where it sits on the dome and how big it is cut. */
+interface CapSpot {
+  /** Degrees around Y from +Z, the face the camera sees. */
+  azimuth: number
+  /** Degrees down from the apex. */
+  polar: number
+  radius: number
+}
+
+/**
+ * Five spots, sized and placed by hand so the cap looks cut rather than stamped. Every
+ * polar angle stays inside 25-55 degrees and every azimuth inside +/-62: nearer the apex
+ * and a lifted spot clears the tile's ceiling, nearer the rim and it hangs over the edge.
+ */
+const CAP_SPOTS: readonly CapSpot[] = [
+  { azimuth: -62, polar: 46, radius: 0.075 },
+  { azimuth: -20, polar: 33, radius: 0.055 },
+  { azimuth: 4, polar: 55, radius: 0.06 },
+  { azimuth: 22, polar: 52, radius: 0.07 },
+  { azimuth: 58, polar: 36, radius: 0.05 },
+]
+
+/**
+ * How far a spot stands off the cap. A flat disc chorded across the dome sags by about
+ * r^2 / 2R — some 0.006 tile at the largest spot — so anything less lets the disc's rim
+ * sink into the cap and z-fight. This is that sag doubled.
+ */
+const SPOT_LIFT = 0.012
+const SPOT_SEGMENTS = 10
 
 /** Gameplay entities sit on the Z = 0 plane. */
 const GAMEPLAY_Z = 0
 
 /** Keeps foot/ledge probes just inside the tile they are meant to sample. */
 const PROBE_EPS = 1e-4
+
+const DEG = Math.PI / 180
 
 /** Flat-fill a geometry's vertices so the merged mesh keeps its parts distinguishable. */
 function paint(geometry: THREE.BufferGeometry, hex: number): void {
@@ -76,38 +131,97 @@ function paint(geometry: THREE.BufferGeometry, hex: number): void {
 }
 
 /**
- * A wide cap over a narrower stem, merged into ONE geometry: main.ts disposes
+ * The cap's profile in world units, authored bottom-to-top: the underside's centre, out to
+ * the rim, then up the quarter-ellipse to the apex. The direction is not a style choice —
+ * THREE derives lathe normals from the profile's direction of travel, so a top-to-bottom
+ * profile renders the cap inside-out. The flat leading run out to the rim closes the
+ * underside with a disc, so the bell is a solid rather than a shell you can see through.
+ */
+function capProfile(): THREE.Vector2[] {
+  const points = [new THREE.Vector2(0, CAP_RIM_Y * TILE_SIZE)]
+
+  for (let step = 0; step <= CAP_PROFILE_STEPS; step += 1) {
+    const t = (Math.PI / 2) * (step / CAP_PROFILE_STEPS)
+    points.push(
+      new THREE.Vector2(
+        CAP_RADIUS * Math.cos(t) * TILE_SIZE,
+        (CAP_RIM_Y + CAP_HEIGHT * Math.sin(t)) * TILE_SIZE,
+      ),
+    )
+  }
+
+  return points
+}
+
+/**
+ * One spot, laid on the cap's surface and lifted clear of it. The cap is a squashed
+ * ellipsoid, so its outward normal is NOT the radial direction; taking the real gradient
+ * is what keeps a flat disc hugging the dome instead of skewing off its shoulder.
+ */
+function createSpotGeometry(spot: CapSpot): THREE.BufferGeometry {
+  const azimuth = spot.azimuth * DEG
+  const polar = spot.polar * DEG
+  // Azimuth 0 faces +Z, matching LatheGeometry's own convention for the cap beneath.
+  const ring = CAP_RADIUS * Math.sin(polar)
+  const surface = new THREE.Vector3(
+    ring * Math.sin(azimuth),
+    CAP_RIM_Y + CAP_HEIGHT * Math.cos(polar),
+    ring * Math.cos(azimuth),
+  )
+
+  // Gradient of (x/R)^2 + ((y - rim)/H)^2 + (z/R)^2 = 1 at that point.
+  const normal = new THREE.Vector3(
+    surface.x / (CAP_RADIUS * CAP_RADIUS),
+    (surface.y - CAP_RIM_Y) / (CAP_HEIGHT * CAP_HEIGHT),
+    surface.z / (CAP_RADIUS * CAP_RADIUS),
+  ).normalize()
+
+  const disc = new THREE.CircleGeometry(spot.radius * TILE_SIZE, SPOT_SEGMENTS)
+  // A circle faces +Z, so turning +Z onto the normal lays it flat against the cap.
+  disc.applyQuaternion(
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal),
+  )
+  disc.translate(
+    (surface.x + normal.x * SPOT_LIFT) * TILE_SIZE,
+    (surface.y + normal.y * SPOT_LIFT) * TILE_SIZE,
+    (surface.z + normal.z * SPOT_LIFT) * TILE_SIZE,
+  )
+  paint(disc, WALKER_SPOT_COLOR)
+  return disc
+}
+
+/**
+ * A spotted bell cap over a tapered stem, merged into ONE geometry: main.ts disposes
  * walker.mesh.geometry and walker.mesh.material directly, so child meshes or a material
  * array would leak. mergeGeometries keeps useGroups false for the same reason — groups
  * would demand a material array.
  */
 function createMushroomGeometry(): THREE.BufferGeometry {
-  const stemHeight = MESH_SPAN - CAP_HEIGHT + NECK_OVERLAP
-
-  const cap = new THREE.BoxGeometry(
-    CAP_WIDTH * TILE_SIZE,
-    CAP_HEIGHT * TILE_SIZE,
-    CAP_DEPTH * TILE_SIZE,
-  )
-  cap.translate(0, (MESH_SPAN / 2 - CAP_HEIGHT / 2) * TILE_SIZE, 0)
+  const cap = new THREE.LatheGeometry(capProfile(), CAP_RADIAL_SEGMENTS)
   paint(cap, WALKER_CAP_COLOR)
 
-  const stem = new THREE.BoxGeometry(
-    STEM_WIDTH * TILE_SIZE,
-    stemHeight * TILE_SIZE,
-    STEM_DEPTH * TILE_SIZE,
+  // The foot is pinned to the tile's floor; the top runs past the rim by NECK_OVERLAP, far
+  // enough inside the dome (which is still 0.45 tiles wide there) that no seam can open.
+  const footY = -MESH_SPAN / 2
+  const topY = CAP_RIM_Y + NECK_OVERLAP
+  const stem = new THREE.CylinderGeometry(
+    STEM_TOP_RADIUS * TILE_SIZE,
+    STEM_FOOT_RADIUS * TILE_SIZE,
+    (topY - footY) * TILE_SIZE,
+    STEM_RADIAL_SEGMENTS,
   )
-  stem.translate(0, (stemHeight / 2 - MESH_SPAN / 2) * TILE_SIZE, 0)
+  stem.translate(0, ((topY + footY) / 2) * TILE_SIZE, 0)
   paint(stem, WALKER_STEM_COLOR)
+
+  const parts = [cap, stem, ...CAP_SPOTS.map(createSpotGeometry)]
 
   // Typed non-null, but the implementation returns null when attribute sets disagree —
   // fail here rather than handing main.ts a null geometry to dispose().
-  const merged = mergeGeometries([cap, stem])
-  if (merged === null) throw new Error('walker: cap and stem attributes are incompatible')
+  const merged = mergeGeometries(parts)
+  if (merged === null) throw new Error('walker: mushroom part attributes are incompatible')
 
   // Only the merged geometry is reachable from main.ts, so free the sources here.
-  cap.dispose()
-  stem.dispose()
+  for (const part of parts) part.dispose()
   return merged
 }
 

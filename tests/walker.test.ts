@@ -215,19 +215,26 @@ describe('stomp', () => {
 })
 
 describe('mushroom mesh', () => {
-  /** One flat-coloured part of the merged geometry: its colour, Y span, and half-width. */
+  /** Vertices this close together in world units count as the same radius or angle. */
+  const ROUND = 3
+
+  /** One flat-coloured part of the merged geometry: its colour, extents, and roundness. */
   interface Part {
     color: [number, number, number]
     minY: number
     maxY: number
     halfWidth: number
     vertices: number
+    /** Distinct horizontal radii, which is what tells a lathed bell from a slab. */
+    radii: Set<string>
+    /** Distinct angles around Y. A box has four; anything revolved has many more. */
+    azimuths: Set<string>
   }
 
   /**
-   * Split the merged geometry into parts by vertex colour, topmost first. Partitioning by
-   * colour rather than by a Y band is what lets the neck-overlap test see the join: the
-   * two parts' Y spans are allowed to intersect.
+   * Split the merged geometry into parts by vertex colour. Partitioning by colour rather
+   * than by a Y band is what lets the neck-overlap test see the join: the parts' Y spans
+   * are allowed to intersect, and the spots sit inside the cap's own span.
    */
   function meshParts(geometry: THREE.BufferGeometry): Part[] {
     const position = geometry.getAttribute('position')
@@ -235,29 +242,50 @@ describe('mushroom mesh', () => {
     const byColor = new Map<string, Part>()
 
     for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i)
       const y = position.getY(i)
-      const halfWidth = Math.abs(position.getX(i))
+      const z = position.getZ(i)
+      const radius = Math.hypot(x, z).toFixed(ROUND)
+      const azimuth = Math.atan2(z, x).toFixed(ROUND)
       const rgb: [number, number, number] = [color.getX(i), color.getY(i), color.getZ(i)]
       const part = byColor.get(rgb.join(','))
 
       if (part) {
         part.minY = Math.min(part.minY, y)
         part.maxY = Math.max(part.maxY, y)
-        part.halfWidth = Math.max(part.halfWidth, halfWidth)
+        part.halfWidth = Math.max(part.halfWidth, Math.abs(x))
         part.vertices += 1
+        part.radii.add(radius)
+        part.azimuths.add(azimuth)
       } else {
-        byColor.set(rgb.join(','), { color: rgb, minY: y, maxY: y, halfWidth, vertices: 1 })
+        byColor.set(rgb.join(','), {
+          color: rgb,
+          minY: y,
+          maxY: y,
+          halfWidth: Math.abs(x),
+          vertices: 1,
+          radii: new Set([radius]),
+          azimuths: new Set([azimuth]),
+        })
       }
     }
 
-    return [...byColor.values()].sort((a, b) => b.maxY - a.maxY)
+    return [...byColor.values()]
   }
 
-  /** The cap (topmost part) and the stem below it. */
-  function capAndStem(geometry: THREE.BufferGeometry): [Part, Part] {
+  /**
+   * The three parts of the toadstool, picked by role rather than by Y order: a spot lifted
+   * off the dome can out-rank the cap's own apex, so "topmost part" is not the cap.
+   */
+  function toadstool(geometry: THREE.BufferGeometry): { cap: Part; stem: Part; spots: Part } {
     const parts = meshParts(geometry)
-    expect(parts).toHaveLength(2)
-    return [parts[0]!, parts[1]!]
+    expect(parts).toHaveLength(3)
+
+    const cap = parts.reduce((a, b) => (b.halfWidth > a.halfWidth ? b : a))
+    const stem = parts.reduce((a, b) => (b.minY < a.minY ? b : a))
+    const spots = parts.find((part) => part !== cap && part !== stem)!
+
+    return { cap, stem, spots }
   }
 
   // main.ts disposes walker.mesh.geometry and walker.mesh.material directly, so the mesh
@@ -270,10 +298,10 @@ describe('mushroom mesh', () => {
     expect(Array.isArray(walker.mesh.material)).toBe(false)
     expect(walker.mesh.material).toBeInstanceOf(THREE.MeshLambertMaterial)
     expect(walker.mesh.material).not.toBeInstanceOf(THREE.MeshStandardMaterial)
-    // Two parts are drawn by one material, so vertex colours carry the difference.
+    // Three parts are drawn by one material, so vertex colours carry the difference.
     expect(walker.mesh.material.vertexColors).toBe(true)
     // Must stay white: Lambert multiplies material.color by the vertex colour, so any
-    // tint here would darken both the cap and the stem.
+    // tint here would darken the cap, the stem and the spots together.
     expect(walker.mesh.material.color.getHex()).toBe(0xffffff)
     // Groups would demand a material array, which main.ts's single dispose() cannot free.
     expect(walker.mesh.geometry.groups).toHaveLength(0)
@@ -289,26 +317,8 @@ describe('mushroom mesh', () => {
     expect(color.count).toBe(geometry.getAttribute('position').count)
   })
 
-  test('reads as a mushroom: the cap overhangs a narrower stem', () => {
-    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
-
-    expect(stem.halfWidth).toBeLessThan(cap.halfWidth)
-    // The stem hangs below the cap rather than beside it.
-    expect(stem.minY).toBeLessThan(cap.minY)
-    expect(cap.maxY).toBeGreaterThan(stem.maxY)
-  })
-
-  test('overlaps at the neck, so the join cannot open a seam', () => {
-    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
-
-    // The stem's top sits inside the cap, not flush with its underside or short of it.
-    expect(stem.maxY).toBeGreaterThan(cap.minY)
-  })
-
-  test('paints exactly two colours: a red cap over a pale stem', () => {
-    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
-    // Every vertex of each part carries that part's colour.
-    expect(cap.vertices + stem.vertices).toBe(48)
+  test('paints three parts: a red cap, a cream stem, and paler spots', () => {
+    const { cap, stem, spots } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
 
     // Ratios only: THREE converts hex through the working colour space, so absolute
     // channel values depend on ColorManagement rather than on the art.
@@ -322,19 +332,108 @@ describe('mushroom mesh', () => {
     expect(stemB).toBeGreaterThan(capB)
     expect(stemG).toBeGreaterThan(0.5 * stemR)
     expect(stemB).toBeGreaterThan(0.5 * stemR)
+
+    // The spots carry their own hex, brighter than the stem in every channel. Sharing the
+    // stem's cream would fold them into the stem's part and hide them from every assertion
+    // below — the same reason the king's crown points are brighter than his band.
+    const [spotR, spotG, spotB] = spots.color
+    expect(spotR).toBeGreaterThan(stemR)
+    expect(spotG).toBeGreaterThan(stemG)
+    expect(spotB).toBeGreaterThan(stemB)
+    // ...and paler than the cap they sit on, so they read at a glance.
+    expect(spotG).toBeGreaterThan(capG)
+    expect(spotB).toBeGreaterThan(capB)
   })
 
-  test('still fills exactly one tile, centred on the origin', () => {
+  test('reads as a mushroom: the cap overhangs a narrower stem', () => {
+    const { cap, stem } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    expect(stem.halfWidth).toBeLessThan(cap.halfWidth)
+    // The stem hangs below the cap rather than beside it.
+    expect(stem.minY).toBeLessThan(cap.minY)
+    expect(cap.maxY).toBeGreaterThan(stem.maxY)
+  })
+
+  test('overlaps at the neck, so the join cannot open a seam', () => {
+    const { cap, stem } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    // The stem's top sits inside the cap, not flush with its underside or short of it.
+    expect(stem.maxY).toBeGreaterThan(cap.minY)
+  })
+
+  test('has a bell cap, not a slab: it narrows toward the top and turns all the way round', () => {
+    const { cap } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    // A lathed profile gives a different radius at every height. A box gives exactly one.
+    expect(cap.radii.size).toBeGreaterThanOrEqual(5)
+    // ...and revolving it gives many angles around Y. A box gives exactly four.
+    expect(cap.azimuths.size).toBeGreaterThanOrEqual(8)
+  })
+
+  test('has a round stem, not a post', () => {
+    const { stem } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    expect(stem.azimuths.size).toBeGreaterThanOrEqual(8)
+  })
+
+  test('is no longer two merged boxes', () => {
     const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+
+    // Two BoxGeometries merge to exactly 48 vertices. A bell, a cylinder and five discs
+    // cannot land there, so this is the coarse guard that the silhouette really changed.
+    expect(geometry.getAttribute('position').count).toBeGreaterThan(48)
+  })
+
+  test('wears its spots on the cap', () => {
+    const { cap, spots } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    // Above the rim and below the apex: on the dome's shoulder, where they are visible.
+    expect(spots.minY).toBeGreaterThan(cap.minY)
+    expect(spots.maxY).toBeLessThan(cap.maxY)
+    // Lifted clear of the surface to avoid z-fighting, but never past the cap's own edge.
+    expect(spots.halfWidth).toBeLessThanOrEqual(cap.halfWidth)
+  })
+
+  test('builds the cap right way out', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const position = geometry.getAttribute('position')
+    const normal = geometry.getAttribute('normal')
+
+    let top = 0
+    for (let i = 1; i < position.count; i += 1) {
+      if (position.getY(i) > position.getY(top)) top = i
+    }
+
+    // THREE derives lathe normals from the profile's direction of travel, so a profile
+    // authored top-to-bottom renders the cap inside-out. At the apex, out means up.
+    expect(normal.getY(top)).toBeGreaterThan(0)
+  })
+
+  test('stays inside one tile, standing on its floor', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const half = 0.5 * TILE_SIZE
+    const eps = 1e-6
 
     geometry.computeBoundingBox()
     const box = geometry.boundingBox!
-    expect(box.min.x).toBeCloseTo(-0.5 * TILE_SIZE, 6)
-    expect(box.max.x).toBeCloseTo(0.5 * TILE_SIZE, 6)
-    expect(box.min.y).toBeCloseTo(-0.5 * TILE_SIZE, 6)
-    expect(box.max.y).toBeCloseTo(0.5 * TILE_SIZE, 6)
-    expect(box.min.z).toBeCloseTo(-0.5 * TILE_SIZE, 6)
-    expect(box.max.z).toBeCloseTo(0.5 * TILE_SIZE, 6)
+
+    // A round cap cannot kiss the corners of a cube, so the art stays INSIDE its tile
+    // rather than filling it — including the spots, which stand proud of the dome.
+    expect(box.min.x).toBeGreaterThanOrEqual(-half - eps)
+    expect(box.max.x).toBeLessThanOrEqual(half + eps)
+    expect(box.min.y).toBeGreaterThanOrEqual(-half - eps)
+    expect(box.max.y).toBeLessThanOrEqual(half + eps)
+    expect(box.min.z).toBeGreaterThanOrEqual(-half - eps)
+    expect(box.max.z).toBeLessThanOrEqual(half + eps)
+
+    // The one measurement that must stay exact: syncMesh centres the mesh on a one-tile
+    // AABB, so the stem's foot at local -half IS the walker's feet on the floor. Drift
+    // here floats or sinks every walker in the game.
+    expect(box.min.y).toBeCloseTo(-half, 6)
+
+    // ...and the cap still fills most of the tile, so "stays inside" cannot decay into
+    // a pinhead that technically passes every bound above.
+    expect(box.max.x).toBeGreaterThan(0.4 * TILE_SIZE)
   })
 
   test('sits on the gameplay plane, synced from the hitbox', () => {
@@ -393,15 +492,17 @@ describe('hitbox', () => {
     const walker = walker1x1()
     const mesh = meshWorldBounds(walker.mesh.geometry)
 
-    // The mushroom spans one tile of ART, which is TILE_SIZE world units — sixteen times
-    // the hitbox number. Same silhouette, different space: assigning the mesh bounds to
-    // the AABB is the bug this test exists to catch.
-    expect(mesh.width).toBeCloseTo(TILE_SIZE, 6)
-    expect(mesh.height).toBeCloseTo(TILE_SIZE, 6)
+    // The mushroom spans most of one tile of ART, which is TILE_SIZE world units — an
+    // order of magnitude more than the hitbox number. It no longer fills the tile exactly
+    // (a round cap cannot), so this measures the gap in scale rather than pinning a size.
+    // Same silhouette, different space: assigning the mesh bounds to the AABB is the bug
+    // this test exists to catch.
+    expect(mesh.width).toBeGreaterThan(10 * walker.aabb.w)
+    expect(mesh.height).toBeGreaterThan(10 * walker.aabb.h)
+    expect(mesh.width).toBeLessThanOrEqual(TILE_SIZE)
+    expect(mesh.height).toBeLessThanOrEqual(TILE_SIZE)
     expect(walker.aabb.w).not.toBe(mesh.width)
     expect(walker.aabb.h).not.toBe(mesh.height)
-    expect(walker.aabb.w * TILE_SIZE).toBeCloseTo(mesh.width, 6)
-    expect(walker.aabb.h * TILE_SIZE).toBeCloseTo(mesh.height, 6)
   })
 
   test('is never scaled into world units', () => {
