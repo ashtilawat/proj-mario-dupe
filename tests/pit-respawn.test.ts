@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { startGame, type Game } from '../src/main'
+import { START_LEVEL, startGame, type Game } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
@@ -38,7 +38,7 @@ afterEach(() => {
 describe('falling into a pit', () => {
   test('costs a life and respawns the player at the level spawn', () => {
     const { game } = start()
-    const [spawnX, spawnY] = loadLevel('1-1').spawn
+    const [spawnX, spawnY] = loadLevel(START_LEVEL).spawn
     expect(game.hud.getState().lives).toBe(3)
 
     // Drop the body clear of the level, still moving, as a real pit fall would.
@@ -55,9 +55,24 @@ describe('falling into a pit', () => {
     expect(game.player.body.velocity.y).toBe(0)
   })
 
+  // tick(1/60) runs two 120 Hz steps, and the second one lands the player — which zeroes
+  // vy on its own. Driving a single step is the only way to see the respawn's own zeroing.
+  test('respawns at rest, before gravity has had a step to act', () => {
+    const { game } = start()
+    const [, spawnY] = loadLevel(START_LEVEL).spawn
+
+    game.player.body.aabb.y = -10
+    game.player.body.velocity.y = -12
+
+    game.loop.tick(1 / 120)
+
+    expect(game.player.body.aabb.y).toBeCloseTo(spawnY, 5)
+    expect(game.player.body.velocity.y).toBe(0)
+  })
+
   test('keeps following the respawned player with the camera', () => {
     const { game } = start()
-    const [spawnX] = loadLevel('1-1').spawn
+    const [spawnX] = loadLevel(START_LEVEL).spawn
 
     game.player.body.aabb.x = 20
     game.player.body.aabb.y = -10
