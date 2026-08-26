@@ -19,6 +19,7 @@ import type { Aabb, TileGrid, TileKind } from './physics/index.ts'
 import {
   GAMEPLAY_Z,
   SKY_COLOR,
+  UNDERGROUND_SKY_COLOR,
   applyTileArt,
   createBackdrop,
   createLights,
@@ -637,6 +638,21 @@ export function startGame(
     // the grayscale ground art multiplies with the grass/dirt instance colors set above.
     applyTileArt(tiles, level.theme)
     scene.add(tiles)
+
+    // The other two things a theme owns, both of them outside the tile batch. Here rather
+    // than once at boot so they follow every swap — a flag walk 1-2 → 1-3 has to go dark and
+    // 1-3 → 1-4 has to come back, and neither of those reloads the page.
+    //
+    // Only `underground` moves the sky. Castle is its own theme and keeps the blue: the
+    // clear color is not what makes a castle read as one, and the tile art already does.
+    scene.background = new THREE.Color(
+      level.theme === 'underground' ? UNDERGROUND_SKY_COLOR : BACKGROUND_COLOR,
+    )
+    // Hidden rather than rebuilt or unparented: the group is built once for the whole run
+    // (see `createBackdrop` above) and carries no level state, so a theme swap is a flag
+    // flip. Grass-only because that is what the art is — hills and clouds have no business
+    // standing behind a castle, and none at all underground.
+    backdrop.visible = level.theme === 'grass'
 
     for (const walker of walkers) {
       walker.mesh.geometry.dispose()
