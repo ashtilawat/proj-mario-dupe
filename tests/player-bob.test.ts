@@ -311,7 +311,10 @@ describe('the bob is phased on distance, not on the clock', () => {
     for (let i = 0; i < 300; i += 1) {
       player.step(FIXED_DT, held)
       peak = Math.max(peak, bobLift(player))
-      expect(bobLift(player)).toBeLessThanOrEqual(BOB_AMPLITUDE)
+      // bobLift subtracts the hitbox centre off an already-rounded sum (mesh.position.y is
+      // IEEE 754 float64), so the recovered lift can sit one ULP above the cap; the upper
+      // bound slack is exactly that.
+      expect(bobLift(player)).toBeLessThanOrEqual(BOB_AMPLITUDE + Number.EPSILON * Math.abs(player.mesh.position.y))
     }
 
     expect(peak).toBeCloseTo(BOB_AMPLITUDE, 2)
