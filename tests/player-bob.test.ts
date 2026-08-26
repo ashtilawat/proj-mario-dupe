@@ -336,6 +336,21 @@ describe('the bob is decoration and nothing else', () => {
     }
   })
 
+  test('the walk never nudges the hitbox horizontally either', () => {
+    // The y-axis guard above needs an x-axis twin, and asserting mesh.position.x against
+    // body.aabb.x cannot be that twin: mesh.position.x is DERIVED from body.aabb.x, so a bob
+    // leaking into the hitbox moves both sides together and the equality still holds. Watch
+    // the hitbox against the velocity that is supposed to be the only thing moving it.
+    const player = onGround()
+
+    for (let i = 0; i < 400; i += 1) {
+      const before = player.body.aabb.x
+      player.step(FIXED_DT, input({ moveX: 1, right: true }))
+      // The sweep advances the hitbox by velocity x dt, and by nothing else.
+      expect(player.body.aabb.x - before).toBeCloseTo(player.body.velocity.x * FIXED_DT, 10)
+    }
+  })
+
   test('never touches the hitbox, through a long walking and jumping run', () => {
     const player = onGround()
 
@@ -356,9 +371,10 @@ describe('the bob is decoration and nothing else', () => {
   })
 
   test('the simulation runs identically whether or not there is a mesh to bob', () => {
-    // The strongest independence statement available: swap the real character for a bare
-    // Object3D and the body must trace the SAME numbers, bit for bit. Any feedback from
-    // mesh.position back into the sim would show up here as a divergence.
+    // Swap the real character for a bare Object3D and the body must trace the SAME numbers,
+    // bit for bit: the simulation is invariant to which mesh instance it drives. This does not
+    // catch a leak that is applied identically regardless of which mesh is present — see the
+    // aabb.y and aabb.x guards above for that.
     const real = onGround()
     const stubbed = onGround(2, new THREE.Object3D())
 
