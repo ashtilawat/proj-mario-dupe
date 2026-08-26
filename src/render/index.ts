@@ -3,6 +3,7 @@ import type { TileGrid } from '../physics/index.ts'
 import { DIRT_COLOR, GRASS_TOP_COLOR, applyTileArt } from './tile-art.ts'
 
 export * from './tile-art.ts'
+export { createBackdrop } from './backdrop.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
 export const FRUSTUM_HEIGHT = 10
