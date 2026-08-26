@@ -186,6 +186,11 @@ describe('coyote time', () => {
     updateCoyoteTimer(timer, true, FIXED_DT)
     expect(canCoyoteJump(timer)).toBe(true)
 
+    // The first airborne update is the step off the ledge itself, which opens the window
+    // rather than spending it — see the T-015 tests in coyote-window.test.ts.
+    updateCoyoteTimer(timer, false, FIXED_DT)
+    expect(canCoyoteJump(timer)).toBe(true)
+
     updateCoyoteTimer(timer, false, 0.1)
     expect(canCoyoteJump(timer)).toBe(true)
 
