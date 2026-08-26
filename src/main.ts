@@ -16,7 +16,14 @@ import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
 import { TILE_SIZE, overlaps } from './physics/index.ts'
 import type { Aabb, TileGrid, TileKind } from './physics/index.ts'
-import { GAMEPLAY_Z, SKY_COLOR, applyTileArt, createLights, tileColorAt } from './render/index.ts'
+import {
+  GAMEPLAY_Z,
+  SKY_COLOR,
+  applyTileArt,
+  createBackdrop,
+  createLights,
+  tileColorAt,
+} from './render/index.ts'
 // Aliased: `title` is also the name of the live card below, and the story module owns the
 // copy while `createTitle` owns the DOM.
 import { title as storyTitle } from './story/index.ts'
@@ -455,6 +462,10 @@ export function startGame(
   }
 
   const { directional, hemisphere } = createLights()
+  // Hills and clouds, built once for the whole run. Deliberately not rebuilt by
+  // `applyLevel`: the art carries no level-specific state, so swapping worlds would churn
+  // GPU objects for an identical picture.
+  const backdrop = createBackdrop()
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
   // Filled by `applyLevel`, never reassigned: these arrays are the ones handed out on Game.
@@ -468,6 +479,9 @@ export function startGame(
   const bossLayer = createBossLayer(bosses)
   const flagLayer = createFlagLayer(flagArt)
   scene.add(
+    // First, and it stays first: `createBackdrop` parks itself at BG_Z, well behind the
+    // tile batch at GAMEPLAY_Z, so depth — not draw order — is what keeps it in the back.
+    backdrop,
     directional,
     hemisphere,
     player.mesh,
@@ -932,6 +946,22 @@ export function startGame(
         boss.mesh.material.dispose()
       }
       for (const flag of flagArt) flag.dispose()
+      // Eight meshes over two geometries and three materials, so the sets are what keep
+      // this from disposing the shared ones over and over.
+      const geometries = new Set<THREE.BufferGeometry>()
+      const materials = new Set<THREE.Material>()
+      backdrop.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return
+        geometries.add(object.geometry)
+        for (const material of Array.isArray(object.material)
+          ? object.material
+          : [object.material]) {
+          materials.add(material)
+        }
+      })
+      for (const geometry of geometries) geometry.dispose()
+      for (const material of materials) material.dispose()
+      backdrop.removeFromParent()
       walkerLayer.removeFromParent()
       coinLayer.removeFromParent()
       bossLayer.removeFromParent()
