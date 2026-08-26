@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { STOMP_BOUNCE, TILE_SIZE } from '../src/physics/index.ts'
-import type { TileGrid, TileKind } from '../src/physics/index.ts'
+import { STOMP_BOUNCE, TILE_SIZE, overlaps } from '../src/physics/index.ts'
+import type { Aabb, TileGrid, TileKind } from '../src/physics/index.ts'
 import * as walkerModule from '../src/entities/enemies/walker.ts'
-import { createWalker } from '../src/entities/enemies/walker.ts'
+import { WALKER_HEIGHT, WALKER_WIDTH, createWalker } from '../src/entities/enemies/walker.ts'
+import { PLAYER_HEIGHT, PLAYER_WIDTH } from '../src/entities/player/index.ts'
 
 // Rows are written top-down for readability; tile Y is up, so row 0 is the highest ty.
 // '#' solid, '.' empty. Same stub shape tests/physics.test.ts uses.
@@ -349,6 +350,97 @@ describe('mushroom mesh', () => {
 
     expect(walker.mesh.position.x).toBeCloseTo((walker.aabb.x + walker.aabb.w / 2) * TILE_SIZE, 6)
     expect(walker.mesh.position.y).toBeCloseTo((walker.aabb.y + walker.aabb.h / 2) * TILE_SIZE, 6)
+  })
+})
+
+/**
+ * The gameplay hitbox, pinned against the art.
+ *
+ * Everything else in this file reads the AABB relatively (`aabb.x + aabb.w`) or against
+ * itself (the mesh-sync test positions the mesh FROM `aabb.w`), so nothing says what the
+ * hitbox is meant to measure. An AABB taken from the mushroom's world bounding box would
+ * make the walker sixteen tiles wide — one touch, every life, no way past to the flag —
+ * and the suite would only complain sideways, about patrol. These are the absolute pins:
+ * the hitbox is 1x1 in TILE space, and the cap cannot enlarge it.
+ */
+describe('hitbox', () => {
+  /** The 1-1 walker: { type: "walker", at: [16, 1], props: { dir: -1 } }. */
+  function walker1x1() {
+    return createWalker({ x: 16, y: 1, dir: -1 })
+  }
+
+  /** The merged mushroom geometry's own bounds, in WORLD units (TILE_SIZE per tile). */
+  function meshWorldBounds(geometry: THREE.BufferGeometry) {
+    geometry.computeBoundingBox()
+    const box = geometry.boundingBox!
+    return { width: box.max.x - box.min.x, height: box.max.y - box.min.y }
+  }
+
+  test('is exactly one tile, in tile units, from the spawn point', () => {
+    expect(walker1x1().aabb).toEqual({ x: 16, y: 1, w: 1, h: 1 })
+    expect(WALKER_WIDTH).toBe(1)
+    expect(WALKER_HEIGHT).toBe(1)
+  })
+
+  test('is built from the hitbox constants, not from the mesh', () => {
+    const walker = walker1x1()
+
+    expect(walker.aabb.w).toBe(WALKER_WIDTH)
+    expect(walker.aabb.h).toBe(WALKER_HEIGHT)
+  })
+
+  test('is not a copy of the cap mesh world bounds', () => {
+    const walker = walker1x1()
+    const mesh = meshWorldBounds(walker.mesh.geometry)
+
+    // The mushroom spans one tile of ART, which is TILE_SIZE world units — sixteen times
+    // the hitbox number. Same silhouette, different space: assigning the mesh bounds to
+    // the AABB is the bug this test exists to catch.
+    expect(mesh.width).toBeCloseTo(TILE_SIZE, 6)
+    expect(mesh.height).toBeCloseTo(TILE_SIZE, 6)
+    expect(walker.aabb.w).not.toBe(mesh.width)
+    expect(walker.aabb.h).not.toBe(mesh.height)
+    expect(walker.aabb.w * TILE_SIZE).toBeCloseTo(mesh.width, 6)
+    expect(walker.aabb.h * TILE_SIZE).toBeCloseTo(mesh.height, 6)
+  })
+
+  test('is never scaled into world units', () => {
+    const walker = walker1x1()
+
+    expect(walker.aabb.w).not.toBe(TILE_SIZE)
+    expect(walker.aabb.h).not.toBe(TILE_SIZE)
+  })
+
+  test('the cap buys the walker no reach past its own tile', () => {
+    const walker = walker1x1()
+    // Probes are anchored to the tile the walker spawned on — [16, 17] x [1, 2] — never to
+    // `walker.aabb.w`. Measuring the box against itself is how an inflated hitbox hides.
+    const beside = (probe: Aabb) => overlaps(probe, walker.aabb)
+
+    // Real player boxes, laid flush against each face. Touching edges are not an overlap,
+    // so flush means "just outside".
+    const player = { w: PLAYER_WIDTH, h: PLAYER_HEIGHT }
+    expect(beside({ x: 16 - PLAYER_WIDTH, y: 1, ...player })).toBe(false)
+    expect(beside({ x: 17, y: 1, ...player })).toBe(false)
+    expect(beside({ x: 16, y: 2, ...player })).toBe(false)
+
+    // ...and one that really is inside it, so the probes above are not vacuously false.
+    expect(beside({ x: 16.2, y: 1, ...player })).toBe(true)
+  })
+
+  // Across all three grids, so the wall-bounce and ledge-turn branches of `step` are
+  // covered too, not just the straight walk.
+  test.each([
+    ['a long floor', LONG_FLOOR],
+    ['a wall to bounce off', WALL_AHEAD],
+    ['a ledge to turn at', LEDGE],
+  ])('keeps its size while patrolling %s', (_label, grid) => {
+    const walker = createWalker({ x: 3, y: 1, dir: 1 })
+
+    for (let i = 0; i < 120; i += 1) walker.step(DT, grid)
+
+    expect(walker.aabb.w).toBe(1)
+    expect(walker.aabb.h).toBe(1)
   })
 })
 

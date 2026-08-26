@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { START_LEVEL, startGame, type Game } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
-import { STOMP_BOUNCE, TILE_SIZE } from '../src/physics/index.ts'
+import { STOMP_BOUNCE, TILE_SIZE, overlaps } from '../src/physics/index.ts'
 import { createWalker } from '../src/entities/enemies/walker.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
@@ -238,6 +238,51 @@ describe('stomping a walker', () => {
     game.loop.tick(1 / 120)
 
     expect(game.hud.getState().lives).toBe(2)
+  })
+
+  /**
+   * T-034. A one-tile walker WALKS BACK OUT of the player: at 2 tiles/s (WALK_MAX / 3) it
+   * clears the 0.7-wide player box 0.4 s after first touching it here, well inside the 1 s
+   * i-frame window, so the bump bills one life and the contact is over before the window
+   * reopens. That the contact ENDS is a property of the one-tile hitbox, and it is the
+   * property the reported bug would break: an AABB inflated to the mushroom's 16-unit
+   * world bounds swallows the player and never stops overlapping, so the window reopens
+   * and bills again, and again, to GAME OVER.
+   *
+   * 1.5 s is deliberate on both sides. Shorter would not outlast the i-frames, so a second
+   * bill could hide past the end of the loop; longer would catch the walker coming back
+   * off its pit-rim turn at ~2.6 s, which is a second, legitimate bump.
+   *
+   * What is NOT pinned here, because the fix lives in main.ts and is out of this ticket's
+   * scope: `invuln` is a plain 1 s timer rather than being scoped to the contact, and the
+   * walker's ledge turn can hold it inside a standing player for longer than that. A
+   * player standing at x = 13.8 loses two lives to ONE unbroken 1.525 s contact (bills at
+   * t = 0.75 s and t = 1.758 s). See docs/superpowers/plans/2026-08-26-t034-walker-hitbox.md.
+   */
+  test('a one-tile walker walks back out, so one bump bills one life', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    game.player.body.aabb.x = 16.2
+    game.player.body.aabb.y = 1
+    game.player.body.velocity.x = 0
+    game.player.body.velocity.y = 0
+
+    let contactEndedAt = -1
+    let lowest = game.hud.getState().lives
+    for (let i = 1; i <= 180; i += 1) {
+      game.loop.tick(1 / 120)
+      if (contactEndedAt < 0 && !overlaps(game.player.body.aabb, walker.aabb)) {
+        contactEndedAt = i / 120
+      }
+      lowest = Math.min(lowest, game.hud.getState().lives)
+    }
+
+    // The walker let go, and it did so before the i-frames ran out.
+    expect(contactEndedAt).toBeGreaterThan(0)
+    expect(contactEndedAt).toBeLessThan(1)
+    expect(lowest).toBe(2)
+    expect(game.hud.getState().lives).toBe(2)
+    expect(walker.alive).toBe(true)
   })
 
   test('does not also charge a life for the walker it just stomped', () => {
