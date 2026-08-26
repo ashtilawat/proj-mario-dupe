@@ -9,7 +9,7 @@ import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
 import { TILE_SIZE, overlaps } from './physics/index.ts'
 import type { TileGrid, TileKind } from './physics/index.ts'
-import { GAMEPLAY_Z, createLights } from './render/index.ts'
+import { GAMEPLAY_Z, SKY_COLOR, createLights, tileColorAt } from './render/index.ts'
 import { createHud } from './ui/index.ts'
 import type { Hud } from './ui/index.ts'
 import { createDebugOverlay } from './debug/index.ts'
@@ -21,7 +21,8 @@ export const FRUSTUM_HEIGHT = 10
 /** Distance the camera is pulled back along +Z so the origin is in front of it. */
 export const CAMERA_DISTANCE = 20
 
-export const BACKGROUND_COLOR = 0x101014
+/** The clear color, and with an empty scene the only thing on screen. Sky, not void. */
+export const BACKGROUND_COLOR = SKY_COLOR
 
 export type RendererFactory = (canvas: HTMLCanvasElement) => THREE.WebGLRenderer
 
@@ -116,9 +117,6 @@ export const START_LEVEL = '1-1'
 /** Camera height, in tiles. The 10-tile frustum then covers the whole 12-tile level. */
 export const CAMERA_Y = 5
 
-/** Flat gray so the boxes read as blockout geometry, not art. */
-export const TILE_COLOR = 0x8b8b93
-
 /**
  * A {@link TileGrid} over a level's decoded GIDs. Tiled rows run top-down while physics Y
  * runs up, so row 0 of the RLE is the TOP row and has to be flipped: ty = 0 is the floor.
@@ -144,6 +142,10 @@ export function createTileGridFromLevel(id: string): TileGrid {
 /**
  * Every solid tile as one instanced 1x1 quad batch, so the whole level is a single draw
  * call. Instance i is centred on its tile: tile (tx, ty) spans [tx, tx+1) x [ty, ty+1).
+ *
+ * Grass and dirt are per-instance colors rather than two meshes, so the batch stays one
+ * draw call. The material is therefore white: three multiplies it into the instance color,
+ * and any tint here would darken the whole palette.
  */
 export function createTileMesh(grid: TileGrid): THREE.InstancedMesh {
   let count = 0
@@ -154,11 +156,12 @@ export function createTileMesh(grid: TileGrid): THREE.InstancedMesh {
   }
 
   const geometry = new THREE.PlaneGeometry(1, 1)
-  const material = new THREE.MeshLambertMaterial({ color: TILE_COLOR })
+  const material = new THREE.MeshLambertMaterial({ color: 0xffffff })
   const mesh = new THREE.InstancedMesh(geometry, material, count)
   mesh.name = 'tiles'
 
   const dummy = new THREE.Object3D()
+  const color = new THREE.Color()
   let i = 0
   for (let ty = 0; ty < grid.height; ty += 1) {
     for (let tx = 0; tx < grid.width; tx += 1) {
@@ -166,10 +169,14 @@ export function createTileMesh(grid: TileGrid): THREE.InstancedMesh {
       dummy.position.set(tx + 0.5, ty + 0.5, GAMEPLAY_Z)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
+      // setColorAt allocates instanceColor on the first call; the scratch Color is copied
+      // into the buffer, so reusing it across instances is safe.
+      mesh.setColorAt(i, color.setHex(tileColorAt(grid, tx, ty)))
       i += 1
     }
   }
   mesh.instanceMatrix.needsUpdate = true
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   return mesh
 }
 

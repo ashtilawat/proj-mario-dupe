@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { TileGrid } from '../physics/index.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
 export const FRUSTUM_HEIGHT = 10
@@ -24,6 +25,28 @@ const GAMEPLAY_COLOR = 0x4a7c4e
 const BG_COLOR = 0x2a3a52
 const FG_COLOR = 0x8aa36b
 const PLAYER_COLOR = 0xe8c547
+
+// World 1-1 grass palette. It lives here rather than in main.ts so the live scene and the
+// render module draw from one set of hex values.
+
+/** Clear color for the grass theme. Blue-dominant, so the void reads as sky. */
+export const SKY_COLOR = 0x5c94fc
+
+/** A solid tile with nothing stacked on it: the lit grass surface. */
+export const GRASS_TOP_COLOR = 0x57a83a
+
+/** A solid tile buried under another solid tile: packed earth. */
+export const DIRT_COLOR = 0x8b5a2b
+
+/**
+ * Which palette entry a solid tile is drawn in. Grass is the default and dirt is the
+ * exception, so an out-of-bounds cell above — which every {@link TileGrid} reports as
+ * `empty` — falls through to grass without a special case. Only the cell above matters;
+ * this is a per-tile lookup, not a scan.
+ */
+export function tileColorAt(grid: Pick<TileGrid, 'getTile'>, tx: number, ty: number): number {
+  return grid.getTile(tx, ty + 1) === 'solid' ? DIRT_COLOR : GRASS_TOP_COLOR
+}
 
 export interface TileLayerOptions {
   count: number
