@@ -31,7 +31,11 @@ export const TILE_ART_SIZE = 16
 /** Floor for the ground map, so a textured tile never crushes toward black. ~0.70 of full. */
 export const GROUND_LUMA_FLOOR = 179
 
-/** Floor for the underground map. Lower than the ground floor — the groove cuts deeper. */
+/**
+ * Floor for the underground map, below the ground floor because the groove cuts deeper. A guard
+ * rail rather than an active clamp: the generator bottoms out at 141, one above this. Retuning
+ * the groove or the speckle is what it is here to catch.
+ */
 export const UNDERGROUND_LUMA_FLOOR = 140
 
 /** `Level.theme` value for World 1-1's grass/dirt ground. */
@@ -160,7 +164,10 @@ function undergroundLuma(x: number, y: number): number {
   // Hashing the halved coordinate is what makes the grain chunky: one draw per 2x2 texels. The
   // row is folded about the tile's middle first, so row y and row SIZE-1-y come out identical
   // and the map is EXACTLY symmetric top to bottom — "nothing lights this from above" as a
-  // property of the generator, not as a statistical near-miss the speckle could break.
+  // property of the generator, not as a statistical near-miss the speckle could break. The fold
+  // costs one seam: rows 7 and 8 are mirror partners and must match, which merges rows 6-9 into
+  // a single 4-tall band. Unavoidable at an even height with 2-row blocks, and cheaper than
+  // giving up either the symmetry or the block size.
   const foldedRow = Math.min(y, TILE_ART_SIZE - 1 - y)
   const speckle = UNDERGROUND_SPECKLE[hash2(x >> 1, foldedRow >> 1) % UNDERGROUND_SPECKLE.length]!
   return clamp(UNDERGROUND_BASE_LUMA + groove + speckle, UNDERGROUND_LUMA_FLOOR, 255)
@@ -230,16 +237,16 @@ export function createBrickTexture(): THREE.DataTexture {
 /** The art one theme draws its tiles with. */
 export interface TileArt {
   /** Surface map for a single tile quad; UV 0..1 covers exactly one tile. */
-  texture: THREE.DataTexture
+  readonly texture: THREE.DataTexture
   /** Flat tint for consumers that cannot carry the map — a distant parallax layer, say. */
-  color: number
+  readonly color: number
   /**
    * Per-instance color this theme repaints onto a palette-tinted InstancedMesh, or undefined to
    * keep whatever palette the caller already set. Grass leaves it undefined so World 1-1 keeps
    * its green/brown palette; every other theme owns the tint, because the palette it would
    * otherwise inherit is grass.
    */
-  instanceTint?: number
+  readonly instanceTint?: number
 }
 
 // Themes share one texture instance so a level costs one GPU upload per theme, not one per
@@ -308,7 +315,10 @@ export function applyTileArt<T extends THREE.Mesh>(mesh: T, theme: string = GRAS
 
   if (instanceTint !== undefined && mesh instanceof THREE.InstancedMesh && mesh.instanceColor) {
     const color = new THREE.Color().setHex(instanceTint)
-    for (let i = 0; i < mesh.count; i += 1) mesh.setColorAt(i, color)
+    // Bound by the buffer, not by `mesh.count`: count is three's knob for drawing a prefix of
+    // the batch, so painting only that far would leave the tail its old palette — green again
+    // the moment count goes back up.
+    for (let i = 0; i < mesh.instanceColor.count; i += 1) mesh.setColorAt(i, color)
     mesh.instanceColor.needsUpdate = true
   }
   return mesh

@@ -513,6 +513,20 @@ describe('applyTileArt', () => {
     expect(mesh.instanceColor!.version).toBeGreaterThan(version)
   })
 
+  test('repaints the whole instance color buffer, not just the drawn prefix', () => {
+    const mesh = paletteMesh()
+    // three lets a consumer draw a prefix of the batch by lowering `count`; the buffer keeps
+    // its full length. Repainting only the prefix would leave World 1-1 green in the tail,
+    // ready to reappear the moment `count` goes back up.
+    mesh.count = 1
+
+    applyTileArt(mesh, UNDERGROUND_THEME)
+
+    const expected = expectedTint(UNDERGROUND_ROCK_COLOR, mesh.instanceColor!.count)
+    expect(instanceColors(mesh)).toHaveLength(expected.length)
+    instanceColors(mesh).forEach((value, i) => expect(value).toBeCloseTo(expected[i]!, 5))
+  })
+
   test('never allocates an instance color buffer that was not already there', () => {
     const mesh = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1),
