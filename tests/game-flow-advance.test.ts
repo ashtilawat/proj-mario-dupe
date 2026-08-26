@@ -66,6 +66,11 @@ function start(size = { width: 800, height: 400 }) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const game = startGame(container, () => stubRenderer() as unknown as THREE.WebGLRenderer, size)
+  // T-028: the title card gates the sim until Enter, so a test run starts the way a player
+  // starts one. The card itself is covered by tests/title-flow.test.ts.
+  container.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }),
+  )
   started = game
   return { container, game }
 }

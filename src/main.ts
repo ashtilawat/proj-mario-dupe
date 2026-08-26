@@ -5,13 +5,18 @@ import { createDashInput, createPlayer } from './entities/player/index.ts'
 import type { Player } from './entities/player/index.ts'
 import { createWalker } from './entities/enemies/walker.ts'
 import type { Walker } from './entities/enemies/walker.ts'
+import { createCoin } from './entities/pickups/index.ts'
+import type { Coin } from './entities/pickups/index.ts'
+import { createBossStandin } from './entities/bosses/standin.ts'
+import type { BossFacing, BossStandin } from './entities/bosses/standin.ts'
+import { playSfx } from './audio/index.ts'
 import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
 import { TILE_SIZE, overlaps } from './physics/index.ts'
 import type { Aabb, TileGrid, TileKind } from './physics/index.ts'
 import { GAMEPLAY_Z, SKY_COLOR, createLights, tileColorAt } from './render/index.ts'
-import { createHud } from './ui/index.ts'
-import type { Hud } from './ui/index.ts'
+import { createHud, createTitle } from './ui/index.ts'
+import type { Hud, Title } from './ui/index.ts'
 import { createDebugOverlay } from './debug/index.ts'
 import type { DebugBody, DebugOverlay } from './debug/index.ts'
 
@@ -214,6 +219,57 @@ export function createWalkerLayer(walkers: Walker[]): THREE.Group {
   return group
 }
 
+/** The level entity type the coin factory answers to. */
+export const COIN_ENTITY = 'coin'
+
+/**
+ * Every coin spawn point in a level, as a collectible. Same `at`-is-the-tile convention the
+ * walkers use, so a level places a coin exactly the way it places an enemy.
+ */
+export function createCoins(level: Level): Coin[] {
+  return level.entities
+    .filter((entity) => entity.type === COIN_ENTITY)
+    .map((entity, index) => createCoin({ x: entity.at[0], y: entity.at[1], id: index }))
+}
+
+/**
+ * One parent for every coin mesh, scaled for the same reason {@link createWalkerLayer} is:
+ * coin art is authored in world units (TILE_SIZE per tile) while this game draws one world
+ * unit per tile.
+ */
+export function createCoinLayer(coins: Coin[]): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'coins'
+  group.scale.setScalar(1 / TILE_SIZE)
+  for (const coin of coins) group.add(coin.mesh)
+  return group
+}
+
+/** The level entity type the boss factory answers to. */
+export const BOSS_ENTITY = 'boss'
+
+/**
+ * Every boss in a level. World 1 only gives one to the castle, and most levels have none at
+ * all — the empty array is the normal case, not an error.
+ */
+export function createBosses(level: Level): BossStandin[] {
+  return level.entities
+    .filter((entity) => entity.type === BOSS_ENTITY)
+    .map((entity, index) => {
+      const dir: BossFacing = entity.props?.dir === -1 ? -1 : 1
+      return createBossStandin({ x: entity.at[0], y: entity.at[1], dir, id: index })
+    })
+}
+
+/** One parent for every boss mesh, tile-scaled like the walker and coin layers. */
+export function createBossLayer(bosses: BossStandin[]): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'bosses'
+  group.scale.setScalar(1 / TILE_SIZE)
+  for (const boss of bosses) group.add(boss.mesh)
+  return group
+}
+
 /** The level entity type the flag reader answers to: a level's exit. */
 export const FLAG_ENTITY = 'flag'
 
@@ -313,7 +369,10 @@ export interface Game {
   scene: THREE.Scene
   player: Player
   walkers: Walker[]
+  coins: Coin[]
+  bosses: BossStandin[]
   hud: Hud
+  title: Title
   loop: Loop
   grid: TileGrid
   overlay: DebugOverlay
@@ -371,10 +430,22 @@ export function startGame(
   const { directional, hemisphere } = createLights()
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
-  // Filled by `applyLevel`, never reassigned: this array is the one handed out on Game.
+  // Filled by `applyLevel`, never reassigned: these arrays are the ones handed out on Game.
   const walkers: Walker[] = []
+  const coins: Coin[] = []
+  const bosses: BossStandin[] = []
   const walkerLayer = createWalkerLayer(walkers)
-  scene.add(directional, hemisphere, player.mesh, walkerLayer, overlay.group)
+  const coinLayer = createCoinLayer(coins)
+  const bossLayer = createBossLayer(bosses)
+  scene.add(
+    directional,
+    hemisphere,
+    player.mesh,
+    walkerLayer,
+    coinLayer,
+    bossLayer,
+    overlay.group,
+  )
 
   const hud = createHud()
   hud.mount(container)
@@ -382,6 +453,12 @@ export function startGame(
   // After the HUD, which is what gives a static container its `position: relative`.
   const endOverlay = createEndOverlay()
   container.appendChild(endOverlay.element)
+
+  // Last, so the curtain sits on top of the end card as well as the HUD: both of those use
+  // z-index 20, and DOM order is what breaks the tie. `createTitle` starts visible, and
+  // `title.visible` IS this run's "not started yet" flag — a second boolean could drift.
+  const title = createTitle()
+  title.mount(container)
 
   const input = createInput()
   const dash = createDashInput()
@@ -399,6 +476,9 @@ export function startGame(
    */
   const HIT_IFRAMES_S = 1
   let invuln = 0
+
+  /** Last tick's jump button, so the jump sting can find the press edge. See `simulate`. */
+  let prevJump = false
 
   let mode: RunMode = 'playing'
 
@@ -435,6 +515,25 @@ export function startGame(
     walkers.splice(0, walkers.length, ...createWalkers(level))
     for (const walker of walkers) walkerLayer.add(walker.mesh)
 
+    // Coins and bosses follow the walkers exactly: dispose the old set, splice the shared
+    // array in place, re-hang the meshes. Most levels have no boss, so `bosses` is usually
+    // an empty splice — the cheapest possible no-op.
+    for (const coin of coins) {
+      coin.mesh.geometry.dispose()
+      coin.mesh.material.dispose()
+      coin.mesh.removeFromParent()
+    }
+    coins.splice(0, coins.length, ...createCoins(level))
+    for (const coin of coins) coinLayer.add(coin.mesh)
+
+    for (const boss of bosses) {
+      boss.mesh.geometry.dispose()
+      boss.mesh.material.dispose()
+      boss.mesh.removeFromParent()
+    }
+    bosses.splice(0, bosses.length, ...createBosses(level))
+    for (const boss of bosses) bossLayer.add(boss.mesh)
+
     flags = createFlags(level)
     spawnX = level.spawn[0]
     spawnY = level.spawn[1]
@@ -454,10 +553,18 @@ export function startGame(
     endOverlay.show(next, next === 'win' ? WIN_TEXT : GAME_OVER_TEXT)
   }
 
-  /** One life gone. Spending the last one ends the run. */
+  /**
+   * One life gone. Spending the last one ends the run — and takes the gameover sting with
+   * it instead of the death sting, so the two never stack on the same frame.
+   */
   function loseLife(): void {
     hud.setLives(hud.getState().lives - 1)
-    if (hud.getState().lives === 0) endRun('gameover')
+    if (hud.getState().lives === 0) {
+      playSfx('gameover')
+      endRun('gameover')
+      return
+    }
+    playSfx('death')
   }
 
   /**
@@ -481,6 +588,8 @@ export function startGame(
   /** Enter on an end card: World 1-1 from the top, whichever level the run ended on. */
   function restart(): void {
     hud.setLives(START_LIVES)
+    // Coins are a run total, so a fresh run starts on nothing — same reasoning as lives.
+    hud.setCoins(0)
     invuln = 0
     applyLevel(START_LEVEL)
     endOverlay.hide()
@@ -488,10 +597,16 @@ export function startGame(
   }
 
   // The engine's InputState has no Enter — it is a menu key, not a movement one — so the
-  // card listens for itself. Inert while playing: only a raised card answers to it.
+  // cards listen for themselves. Two of them share the key now, and the order below is the
+  // whole rule: the title always wins it, so an end card can only ever answer to Enter once
+  // the title is down. Between the two, Enter is inert while a run is being played.
   function onKeydown(event: KeyboardEvent): void {
-    if (mode === 'playing') return
     if (event.key !== 'Enter') return
+    if (title.visible) {
+      title.hide()
+      return
+    }
+    if (mode === 'playing') return
     restart()
   }
   window.addEventListener('keydown', onKeydown)
@@ -501,9 +616,23 @@ export function startGame(
   const loop = createLoop({
     input,
     simulate(dt, state) {
-      // An end card is up, so the world stops where it stood: no stepping, no combat, no
-      // pit, no flag. `render` keeps running, and draws that frozen frame under the card.
-      if (mode !== 'playing') return
+      // A card is up, so the world stops where it stood: no stepping, no combat, no pit, no
+      // flag. `render` keeps running, and draws that frozen frame under the card. The title
+      // is the same freeze as an end card, just at the other end of the run — which is what
+      // makes the boot frame the level's untouched opening pose.
+      if (title.visible || mode !== 'playing') {
+        // Consume the jump edge even while frozen so a Space held through the title
+        // does not chirp the moment the run starts.
+        prevJump = state.jump
+        return
+      }
+
+      // The jump chirp rides the input's own rising edge rather than an actual launch:
+      // player.ts owns the launch and is not ours to touch. `simulate` is handed the SAME
+      // InputState object for every fixed step in a frame, so this fires at most once per
+      // tick — but it does fire on a mid-air press that no jump comes of.
+      if (state.jump && !prevJump) playSfx('jump')
+      prevJump = state.jump
 
       // tryStomp judges the stomper by where their feet were and which way they were moving
       // BEFORE this step, and nothing on the player records either — so capture both here.
@@ -523,6 +652,18 @@ export function startGame(
       if (player.body.aabb.x >= checkpointX) latched = true
 
       for (const walker of walkers) walker.step(dt, grid)
+      for (const boss of bosses) boss.step(dt, grid)
+
+      // Pickups, before combat: touching a coin is never contested by anything else, and
+      // `collect` is the one-shot latch, so the score cannot double-count an overlap that
+      // spans several frames. `collected` is only an early-out for the disc already taken.
+      for (const coin of coins) {
+        if (coin.collected) continue
+        if (!overlaps(player.body.aabb, coin.aabb)) continue
+        if (!coin.collect()) continue
+        hud.setCoins(hud.getState().coins + 1)
+        playSfx('coin')
+      }
 
       // A stomp is the walker's call: it checks the fall direction and the overlap, then
       // hands back the bounce to spend. Defeated walkers just stop being drawn. An overlap
@@ -534,12 +675,24 @@ export function startGame(
         if (bounce !== 0) {
           player.body.velocity.y = bounce
           walker.mesh.visible = false
+          playSfx('stomp')
           continue
         }
         if (!walker.alive || invuln > 0) continue
         if (!overlaps(player.body.aabb, walker.aabb)) continue
         loseLife()
         invuln = HIT_IFRAMES_S
+      }
+
+      // Same stomp rule as walkers. Side contact is intentionally not a life: wiring
+      // the stand-in's damage would change the castle fight, which this ticket is not.
+      for (const boss of bosses) {
+        const bounce = boss.tryStomp(player.body.aabb, prevVy, prevBottom)
+        if (bounce !== 0) {
+          player.body.velocity.y = bounce
+          playSfx('stomp')
+          if (!boss.alive) boss.mesh.visible = false
+        }
       }
 
       invuln = Math.max(0, invuln - dt)
@@ -563,6 +716,9 @@ export function startGame(
       if (mode !== 'playing') return
       for (const flag of flags) {
         if (!overlaps(aabb, flag)) continue
+        // Before `advance`, which may swap the level out or raise the win card: the fanfare
+        // belongs to taking the flag either way.
+        playSfx('flag')
         advance()
         break
       }
@@ -582,7 +738,10 @@ export function startGame(
     scene,
     player,
     walkers,
+    coins,
+    bosses,
     hud,
+    title,
     loop,
     grid,
     overlay,
@@ -593,6 +752,7 @@ export function startGame(
       window.removeEventListener('keydown', onKeydown)
       overlay.dispose()
       endOverlay.dispose()
+      title.unmount()
       hud.unmount()
       if (tiles) {
         tiles.geometry.dispose()
@@ -606,7 +766,17 @@ export function startGame(
         walker.mesh.geometry.dispose()
         walker.mesh.material.dispose()
       }
+      for (const coin of coins) {
+        coin.mesh.geometry.dispose()
+        coin.mesh.material.dispose()
+      }
+      for (const boss of bosses) {
+        boss.mesh.geometry.dispose()
+        boss.mesh.material.dispose()
+      }
       walkerLayer.removeFromParent()
+      coinLayer.removeFromParent()
+      bossLayer.removeFromParent()
       app.dispose()
     },
   }
