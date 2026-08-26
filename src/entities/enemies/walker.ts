@@ -42,10 +42,13 @@ const WALKER_CAP_COLOR = 0xc4362f
 const WALKER_STEM_COLOR = 0xf2e2c4
 
 /**
- * Cap and stem, in tiles, as local offsets from the mesh centre. The two together span
- * exactly the 1x1x1 tile the gray box used to, so framing does not shift; they overlap by
- * NECK_OVERLAP at the join so the seam cannot show through or z-fight.
+ * Cap and stem, in tiles, as local offsets from the mesh centre. MESH_SPAN is the art's
+ * own silhouette size, deliberately NOT the WALKER_HEIGHT hitbox constant, so retuning the
+ * hitbox cannot squash the mushroom. The two parts together span exactly the 1x1x1 tile the
+ * gray box used to, so framing does not shift, and they overlap by NECK_OVERLAP at the join
+ * so the seam cannot open or z-fight.
  */
+const MESH_SPAN = 1
 const CAP_WIDTH = 1
 const CAP_HEIGHT = 0.45
 const CAP_DEPTH = 1
@@ -64,7 +67,11 @@ function paint(geometry: THREE.BufferGeometry, hex: number): void {
   const { r, g, b } = new THREE.Color(hex)
   const count = geometry.getAttribute('position').count
   const colors = new Float32Array(count * 3)
-  for (let i = 0; i < count; i += 1) colors.set([r, g, b], i * 3)
+  for (let i = 0; i < count; i += 1) {
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
+  }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 }
 
@@ -75,14 +82,14 @@ function paint(geometry: THREE.BufferGeometry, hex: number): void {
  * would demand a material array.
  */
 function createMushroomGeometry(): THREE.BufferGeometry {
-  const stemHeight = WALKER_HEIGHT - CAP_HEIGHT + NECK_OVERLAP
+  const stemHeight = MESH_SPAN - CAP_HEIGHT + NECK_OVERLAP
 
   const cap = new THREE.BoxGeometry(
     CAP_WIDTH * TILE_SIZE,
     CAP_HEIGHT * TILE_SIZE,
     CAP_DEPTH * TILE_SIZE,
   )
-  cap.translate(0, (WALKER_HEIGHT / 2 - CAP_HEIGHT / 2) * TILE_SIZE, 0)
+  cap.translate(0, (MESH_SPAN / 2 - CAP_HEIGHT / 2) * TILE_SIZE, 0)
   paint(cap, WALKER_CAP_COLOR)
 
   const stem = new THREE.BoxGeometry(
@@ -90,10 +97,14 @@ function createMushroomGeometry(): THREE.BufferGeometry {
     stemHeight * TILE_SIZE,
     STEM_DEPTH * TILE_SIZE,
   )
-  stem.translate(0, (stemHeight / 2 - WALKER_HEIGHT / 2) * TILE_SIZE, 0)
+  stem.translate(0, (stemHeight / 2 - MESH_SPAN / 2) * TILE_SIZE, 0)
   paint(stem, WALKER_STEM_COLOR)
 
+  // Typed non-null, but the implementation returns null when attribute sets disagree —
+  // fail here rather than handing main.ts a null geometry to dispose().
   const merged = mergeGeometries([cap, stem])
+  if (merged === null) throw new Error('walker: cap and stem attributes are incompatible')
+
   // Only the merged geometry is reachable from main.ts, so free the sources here.
   cap.dispose()
   stem.dispose()

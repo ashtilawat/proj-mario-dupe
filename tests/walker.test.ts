@@ -214,38 +214,50 @@ describe('stomp', () => {
 })
 
 describe('mushroom mesh', () => {
-  /** Vertex indices whose local Y falls in a band, in world units. */
-  function bandIndices(geometry: THREE.BufferGeometry, minY: number, maxY: number): number[] {
+  /** One flat-coloured part of the merged geometry: its colour, Y span, and half-width. */
+  interface Part {
+    color: [number, number, number]
+    minY: number
+    maxY: number
+    halfWidth: number
+    vertices: number
+  }
+
+  /**
+   * Split the merged geometry into parts by vertex colour, topmost first. Partitioning by
+   * colour rather than by a Y band is what lets the neck-overlap test see the join: the
+   * two parts' Y spans are allowed to intersect.
+   */
+  function meshParts(geometry: THREE.BufferGeometry): Part[] {
     const position = geometry.getAttribute('position')
-    const indices: number[] = []
+    const color = geometry.getAttribute('color')
+    const byColor = new Map<string, Part>()
+
     for (let i = 0; i < position.count; i += 1) {
       const y = position.getY(i)
-      if (y > minY && y < maxY) indices.push(i)
+      const halfWidth = Math.abs(position.getX(i))
+      const rgb: [number, number, number] = [color.getX(i), color.getY(i), color.getZ(i)]
+      const part = byColor.get(rgb.join(','))
+
+      if (part) {
+        part.minY = Math.min(part.minY, y)
+        part.maxY = Math.max(part.maxY, y)
+        part.halfWidth = Math.max(part.halfWidth, halfWidth)
+        part.vertices += 1
+      } else {
+        byColor.set(rgb.join(','), { color: rgb, minY: y, maxY: y, halfWidth, vertices: 1 })
+      }
     }
-    return indices
+
+    return [...byColor.values()].sort((a, b) => b.maxY - a.maxY)
   }
 
-  /** Widest |x| reached by the given vertices — half the part's width. */
-  function halfWidth(geometry: THREE.BufferGeometry, indices: number[]): number {
-    const position = geometry.getAttribute('position')
-    return indices.reduce((widest, i) => Math.max(widest, Math.abs(position.getX(i))), 0)
+  /** The cap (topmost part) and the stem below it. */
+  function capAndStem(geometry: THREE.BufferGeometry): [Part, Part] {
+    const parts = meshParts(geometry)
+    expect(parts).toHaveLength(2)
+    return [parts[0]!, parts[1]!]
   }
-
-  /** The one colour shared by the given vertices; throws if they disagree. */
-  function bandColor(geometry: THREE.BufferGeometry, indices: number[]): [number, number, number] {
-    const color = geometry.getAttribute('color')
-    const seen = new Set(
-      indices.map((i) => `${color.getX(i)},${color.getY(i)},${color.getZ(i)}`),
-    )
-    expect([...seen]).toHaveLength(1)
-    const first = indices[0]!
-    return [color.getX(first), color.getY(first), color.getZ(first)]
-  }
-
-  // The cap spans y 0.05..0.50 and the stem -0.50..0.10 (tiles), overlapping at the neck.
-  // These bands stay well clear of that overlap, so each samples exactly one part.
-  const CAP_BAND: [number, number] = [0.2 * TILE_SIZE, Infinity]
-  const STEM_BAND: [number, number] = [-Infinity, -0.1 * TILE_SIZE]
 
   // main.ts disposes walker.mesh.geometry and walker.mesh.material directly, so the mesh
   // must stay one Mesh with one geometry and one non-array material or those calls leak.
@@ -253,11 +265,15 @@ describe('mushroom mesh', () => {
     const walker = createWalker({ x: 5, y: 1, dir: 1 })
 
     expect(walker.mesh).toBeInstanceOf(THREE.Mesh)
+    expect(walker.mesh.children).toHaveLength(0)
     expect(Array.isArray(walker.mesh.material)).toBe(false)
     expect(walker.mesh.material).toBeInstanceOf(THREE.MeshLambertMaterial)
     expect(walker.mesh.material).not.toBeInstanceOf(THREE.MeshStandardMaterial)
     // Two parts are drawn by one material, so vertex colours carry the difference.
     expect(walker.mesh.material.vertexColors).toBe(true)
+    // Must stay white: Lambert multiplies material.color by the vertex colour, so any
+    // tint here would darken both the cap and the stem.
+    expect(walker.mesh.material.color.getHex()).toBe(0xffffff)
     // Groups would demand a material array, which main.ts's single dispose() cannot free.
     expect(walker.mesh.geometry.groups).toHaveLength(0)
   })
@@ -273,34 +289,34 @@ describe('mushroom mesh', () => {
   })
 
   test('reads as a mushroom: the cap overhangs a narrower stem', () => {
-    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
 
-    const cap = bandIndices(geometry, ...CAP_BAND)
-    const stem = bandIndices(geometry, ...STEM_BAND)
-    expect(cap.length).toBeGreaterThan(0)
-    expect(stem.length).toBeGreaterThan(0)
+    expect(stem.halfWidth).toBeLessThan(cap.halfWidth)
+    // The stem hangs below the cap rather than beside it.
+    expect(stem.minY).toBeLessThan(cap.minY)
+    expect(cap.maxY).toBeGreaterThan(stem.maxY)
+  })
 
-    expect(halfWidth(geometry, stem)).toBeLessThan(halfWidth(geometry, cap))
+  test('overlaps at the neck, so the join cannot open a seam', () => {
+    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+
+    // The stem's top sits inside the cap, not flush with its underside or short of it.
+    expect(stem.maxY).toBeGreaterThan(cap.minY)
   })
 
   test('paints exactly two colours: a red cap over a pale stem', () => {
-    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
-    const color = geometry.getAttribute('color')
-
-    const distinct = new Set<string>()
-    for (let i = 0; i < color.count; i += 1) {
-      distinct.add(`${color.getX(i)},${color.getY(i)},${color.getZ(i)}`)
-    }
-    expect(distinct.size).toBe(2)
+    const [cap, stem] = capAndStem(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
+    // Every vertex of each part carries that part's colour.
+    expect(cap.vertices + stem.vertices).toBe(48)
 
     // Ratios only: THREE converts hex through the working colour space, so absolute
     // channel values depend on ColorManagement rather than on the art.
-    const [capR, capG, capB] = bandColor(geometry, bandIndices(geometry, ...CAP_BAND))
+    const [capR, capG, capB] = cap.color
     expect(capR).toBeGreaterThan(capG)
     expect(capR).toBeGreaterThan(capB)
 
     // The stem is a pale cream, not a second red: far less saturated than the cap.
-    const [stemR, stemG, stemB] = bandColor(geometry, bandIndices(geometry, ...STEM_BAND))
+    const [stemR, stemG, stemB] = stem.color
     expect(stemG).toBeGreaterThan(capG)
     expect(stemB).toBeGreaterThan(capB)
     expect(stemG).toBeGreaterThan(0.5 * stemR)
