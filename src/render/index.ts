@@ -1,5 +1,8 @@
 import * as THREE from 'three'
 import type { TileGrid } from '../physics/index.ts'
+import { DIRT_COLOR, GRASS_TOP_COLOR, applyTileArt } from './tile-art.ts'
+
+export * from './tile-art.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
 export const FRUSTUM_HEIGHT = 10
@@ -27,16 +30,11 @@ const FG_COLOR = 0x8aa36b
 const PLAYER_COLOR = 0xe8c547
 
 // World 1-1 grass palette. It lives here rather than in main.ts so the live scene and the
-// render module draw from one set of hex values.
+// render module draw from one set of hex values. The two tile hexes moved next to the tile art
+// they tint, in tile-art.ts, and are re-exported above — this stays their one import site.
 
 /** Clear color for the grass theme. Blue-dominant, so the void reads as sky. */
 export const SKY_COLOR = 0x5c94fc
-
-/** A solid tile with nothing stacked on it: the lit grass surface. */
-export const GRASS_TOP_COLOR = 0x57a83a
-
-/** A solid tile buried under another solid tile: packed earth. */
-export const DIRT_COLOR = 0x8b5a2b
 
 /**
  * Which palette entry a solid tile is drawn in. Grass is the default and dirt is the
@@ -52,6 +50,8 @@ export interface TileLayerOptions {
   count: number
   z: number
   color?: number
+  /** Which theme's tile art to map onto the layer. Defaults to grass. */
+  theme?: string
 }
 
 export interface DrawCallSource {
@@ -114,6 +114,9 @@ export function createTileLayer(opts: TileLayerOptions): THREE.InstancedMesh {
   }
   mesh.instanceMatrix.needsUpdate = true
   mesh.position.z = opts.z
+  // Surface art on top of the flat layer color, so the blockout layers read as ground rather
+  // than as solid swatches. The map multiplies with opts.color; it does not replace it.
+  applyTileArt(mesh, opts.theme)
   return mesh
 }
 
