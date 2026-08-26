@@ -249,7 +249,7 @@ describe('tuning constants', () => {
   test('exposes the remaining PRD 4.2 starting values', () => {
     expect(TILE_SIZE).toBe(16)
     expect(FIXED_DT).toBeCloseTo(1 / 120, 12)
-    expect(JUMP_CUTOFF_FACTOR).toBe(0.45)
+    expect(JUMP_CUTOFF_FACTOR).toBe(0.25)
     expect(WALK_MAX).toBe(6)
     expect(DASH_MAX).toBe(9.6)
     expect(GROUND_ACCEL).toBe(30)

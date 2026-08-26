@@ -11,12 +11,12 @@ export const FIXED_DT = 1 / 120
 export const GRAVITY = 60.0
 /** Upward launch speed of a jump, tiles/s. */
 export const JUMP_VELOCITY = 23.0
-/** Fraction of upward velocity kept when the jump button is released early. */
-export const JUMP_CUTOFF_FACTOR = 0.45
+/** Fraction of upward velocity kept when the jump button is released early. 0.25 clips a tap so the arc is clearly shorter than a full hold. */
+export const JUMP_CUTOFF_FACTOR = 0.25
 
 /** Max horizontal walk speed, tiles/s. */
 export const WALK_MAX = 6.0
-/** Max horizontal dash speed, tiles/s. */
+/** Max horizontal dash speed, tiles/s. 9.6 / WALK_MAX 6.0 is the spec 1.6x. */
 export const DASH_MAX = 9.6
 /** Horizontal acceleration while grounded, tiles/s^2. */
 export const GROUND_ACCEL = 30
