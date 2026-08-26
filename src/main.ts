@@ -1165,6 +1165,11 @@ export function startGame(
       // group against a half-frustum of ~10, so a pinned layer never runs out sideways. Written
       // unconditionally: two floats is cheaper than asking whether the layer is even up.
       caveBackdrop.position.x = camera.position.x
+      // Same pin, same zero parallax, third time. The hall wall spans x = ±10 around the group
+      // against a half-frustum of ~8.9 at 16:9, so a pinned layer never runs out sideways.
+      // Written unconditionally like the one above it: two floats is cheaper than asking whether
+      // the layer is even up.
+      castleBackdrop.position.x = camera.position.x
       debugVelocity.vx = player.body.velocity.x
       debugVelocity.vy = player.body.velocity.y
       overlay.setBodies(debugBodies)

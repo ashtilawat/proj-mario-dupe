@@ -11,7 +11,7 @@
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { startGame } from '../src/main'
+import { FRUSTUM_HEIGHT, startGame } from '../src/main'
 import type { Game, Size } from '../src/main'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
@@ -190,6 +190,147 @@ describe('the castle outlives a level swap', () => {
     // Not merely "a castle is still there": the level-independent art must not be torn down and
     // rebuilt per level, and `castleIn` throws on a duplicate.
     expect(castleIn(game.scene)).toBe(before)
+    expect(castleIn(game.scene).visible).toBe(true)
+  })
+})
+
+function isMesh(object: THREE.Object3D): object is THREE.Mesh {
+  return object instanceof THREE.Mesh
+}
+
+function meshesOf(root: THREE.Object3D): THREE.Mesh[] {
+  const found: THREE.Mesh[] = []
+  root.traverse((object) => {
+    if (isMesh(object)) found.push(object)
+  })
+  return found
+}
+
+/**
+ * World-space [min, max] the given meshes cover along one axis.
+ *
+ * The caller must have flushed the scene's world matrices first — see `castleMeshes`. Box3 reads
+ * `matrixWorld`, and a group whose position was set but never flushed still measures at its old
+ * place, which quietly turns every assertion below into a measurement of nothing.
+ */
+function spanOf(meshes: THREE.Mesh[], axis: 'x' | 'y'): [number, number] {
+  const box = new THREE.Box3()
+  for (const mesh of meshes) box.expandByObject(mesh)
+  return [box.min[axis], box.max[axis]]
+}
+
+/**
+ * The castle's meshes of one `kind`, measured where the renderer would draw them. The stub
+ * renderer these tests run against never calls `updateMatrixWorld`, so this stands in for the
+ * real WebGLRenderer, which flushes the whole graph on every `render`.
+ */
+function castleMeshes(scene: THREE.Scene, kind: string): THREE.Mesh[] {
+  scene.updateMatrixWorld(true)
+  return meshesOf(castleIn(scene)).filter((mesh) => mesh.userData['kind'] === kind)
+}
+
+/** The band the orthographic camera actually shows, after `followPlayer` has placed it. */
+function visibleY(game: Game): [number, number] {
+  const half = FRUSTUM_HEIGHT / 2
+  return [game.app.camera.position.y - half, game.app.camera.position.y + half]
+}
+
+function visibleX(game: Game): [number, number] {
+  const { camera } = game.app
+  const half = (camera.right - camera.left) / 2
+  return [camera.position.x - half, camera.position.x + half]
+}
+
+/**
+ * T-061 authored the hall against a camera centred on y = 0. The live camera is not there:
+ * `followPlayer` parks it at CAMERA_Y and slides it along the level. Reconciling those two frames
+ * is wiring, so it belongs to main.ts and is asserted here rather than in the module's own suite.
+ */
+describe('the castle is where the live camera can see it', () => {
+  test('covers the whole visible band, floor to ceiling, with the hall wall', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+    game.loop.tick(1 / 120)
+    const [floor, ceiling] = visibleY(game)
+
+    const wall = castleMeshes(game.scene, 'wall')
+    // Guards the spans below, and pins the lookup: T-061 hangs exactly one wall.
+    expect(wall).toHaveLength(1)
+    const [base, top] = spanOf(wall, 'y')
+
+    // Containment, not overlap, and that distinction is the whole point of this test. The wall
+    // spans y = ±6 around the group, so an UNLIFTED layer still overlaps the live band [0, 10] —
+    // an overlap assertion would pass against unwired code and be worth nothing. What an unlifted
+    // wall cannot do is reach the ceiling: it stops at y = 6 and leaves four world units of bare
+    // sky over a castle interior.
+    expect(base).toBeLessThanOrEqual(floor)
+    expect(top).toBeGreaterThanOrEqual(ceiling)
+  })
+
+  test('brings every pillar and arch into the visible band', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+    game.loop.tick(1 / 120)
+    const [floor, ceiling] = visibleY(game)
+
+    const arcade = [...castleMeshes(game.scene, 'pillar'), ...castleMeshes(game.scene, 'arch')]
+    // Guards the loop: an empty set would make it vacuously true.
+    expect(arcade.length).toBeGreaterThan(0)
+    for (const mesh of arcade) {
+      const [base, top] = spanOf([mesh], 'y')
+      // Real overlap with the band, both ways round.
+      expect(top).toBeGreaterThan(floor)
+      expect(base).toBeLessThan(ceiling)
+    }
+  })
+
+  test('keeps every pillar standing on ground the camera never shows', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+    game.loop.tick(1 / 120)
+    const [floor] = visibleY(game)
+
+    const pillars = castleMeshes(game.scene, 'pillar')
+    expect(pillars.length).toBeGreaterThan(0)
+    for (const pillar of pillars) {
+      // T-061 put the arcade's floor below the frustum bottom so no shaft ever shows the flat cut
+      // edge at its foot. This is what bounds the lift from the other side: the test above only
+      // says "lift it at least this far", and a layer hoisted too high would satisfy that while
+      // walking every pillar's foot into frame.
+      expect(spanOf([pillar], 'y')[0]).toBeLessThan(floor)
+    }
+  })
+})
+
+/**
+ * A viewport narrow enough that `followPlayer` actually tracks on 1-castle. The level is 18 tiles
+ * wide against a half-frustum of 10 at DEFAULT_SIZE, which trips the `maxX <= minX` clamp and
+ * parks the camera on the level's midpoint for the whole run — a travel assertion there would be
+ * vacuous. At 1:1 the half-frustum is 5, so the camera tracks between x = 5 and x = 13.
+ */
+const SQUARE_SIZE: Size = { width: 400, height: 400 }
+
+describe('the castle rides the camera', () => {
+  test('keeps the hall across the whole screen once the camera has travelled', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start(SQUARE_SIZE)
+    const startX = game.app.camera.position.x
+
+    // Mid-level, on the floor row, and deliberately clear of everything 1-castle places: the
+    // walker at x = 5, the boss at x = 8, the coin at x = 15 and the flag at x = 17 — the last of
+    // which would swap the level out and take the castle with it.
+    game.player.body.aabb.x = 12
+    game.player.body.aabb.y = 1
+    game.loop.tick(1 / 120)
+
+    const [left, right] = visibleX(game)
+    const [wallLeft, wallRight] = spanOf(castleMeshes(game.scene, 'wall'), 'x')
+
+    // Guards the two below: they are vacuous if the camera never actually moved.
+    expect(game.app.camera.position.x).toBeGreaterThan(startX)
+    expect(wallLeft).toBeLessThanOrEqual(left)
+    expect(wallRight).toBeGreaterThanOrEqual(right)
+    // Still in the castle: a swap would have hidden the layer and made the spans meaningless.
     expect(castleIn(game.scene).visible).toBe(true)
   })
 })
