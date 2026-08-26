@@ -9,6 +9,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { NEXT_LEVEL, START_LEVEL, createCoins, startGame, type Game } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
+import { FIXED_DT } from '../src/engine/index.ts'
+import { COIN_SPIN_SPEED } from '../src/entities/pickups/coin.ts'
 import { TILE_SIZE } from '../src/physics/index.ts'
 import type { Coin } from '../src/entities/pickups/index.ts'
 
@@ -199,5 +201,88 @@ describe('collecting a coin', () => {
     )
 
     expect(game.hud.getState().coins).toBe(0)
+  })
+})
+
+describe('spinning coins', () => {
+  test('advances an untouched coin every simulate tick', () => {
+    const { game } = start()
+    takeFlag(game, START_LEVEL)
+    const coin = game.coins[0]!
+    const before = coin.mesh.rotation.y
+
+    game.loop.tick(FIXED_DT)
+
+    expect(coin.collected).toBe(false)
+    expect(coin.mesh.rotation.y - before).toBeCloseTo(COIN_SPIN_SPEED * FIXED_DT, 10)
+  })
+
+  test('spins a coin the player is nowhere near, not just the one under them', () => {
+    const { game } = start()
+    takeFlag(game, START_LEVEL)
+    takeFlag(game, '1-2')
+    const [touched, untouched] = [game.coins[0]!, game.coins[1]!]
+
+    standOn(game, touched)
+    game.loop.tick(FIXED_DT)
+
+    // The overlap collected one disc; the far one has to have turned all the same.
+    expect(touched.collected).toBe(true)
+    expect(untouched.collected).toBe(false)
+    expect(untouched.mesh.rotation.y).toBeCloseTo(COIN_SPIN_SPEED * FIXED_DT, 10)
+  })
+
+  test('leaves a collected coin where it stopped', () => {
+    const { game } = start()
+    takeFlag(game, START_LEVEL)
+    const coin = game.coins[0]!
+    standOn(game, coin)
+    game.loop.tick(FIXED_DT)
+    // Non-vacuous: it turned on the tick it was taken, and stops from there.
+    const stopped = coin.mesh.rotation.y
+    expect(stopped).toBeGreaterThan(0)
+
+    for (let i = 0; i < 30; i++) game.loop.tick(FIXED_DT)
+
+    expect(coin.collected).toBe(true)
+    expect(coin.mesh.rotation.y).toBe(stopped)
+  })
+
+  test('holds the spin still while an end card has the run frozen', () => {
+    const { game } = start()
+    takeFlag(game, START_LEVEL)
+    const coin = game.coins[0]!
+
+    // Out of lives: the card goes up and the world stops where it stood.
+    for (let i = 0; i < 3; i++) {
+      game.player.body.aabb.y = -10
+      game.player.body.velocity.y = -12
+      game.loop.tick(FIXED_DT)
+    }
+    // Non-vacuous: the fatal ticks spun it, so this is a stop, not a coin that never moved.
+    const frozen = coin.mesh.rotation.y
+    expect(frozen).toBeGreaterThan(0)
+
+    for (let i = 0; i < 30; i++) game.loop.tick(FIXED_DT)
+
+    expect(coin.mesh.rotation.y).toBe(frozen)
+  })
+
+  test('keeps the hitbox and the pickup working through a spin', () => {
+    const { game } = start()
+    takeFlag(game, START_LEVEL)
+    const coin = game.coins[0]!
+    const box = { ...coin.aabb }
+
+    // Well past a quarter turn, where a spun disc is edge-on to the camera.
+    for (let i = 0; i < 60; i++) game.loop.tick(FIXED_DT)
+    expect(coin.mesh.rotation.y).toBeGreaterThan(Math.PI / 2)
+    expect({ ...coin.aabb }).toEqual(box)
+
+    standOn(game, coin)
+    game.loop.tick(FIXED_DT)
+
+    expect(coin.collected).toBe(true)
+    expect(game.hud.getState().coins).toBe(1)
   })
 })

@@ -780,6 +780,12 @@ export function startGame(
 
       for (const walker of walkers) walker.step(dt, grid)
       for (const boss of bosses) boss.step(dt, grid)
+      // T-044 — every coin in the level, not just one the player happens to be touching:
+      // the idle spin is what makes a disc read as a pickup from across the room. `step` is
+      // rotation only and self-guards on `collected`, so this cannot move a hitbox or
+      // disturb the pickup pass below. Under the freeze above, it does not run at all — a
+      // card stops the coins the same way it stops the walkers.
+      for (const coin of coins) coin.step(dt)
 
       // Pickups, before combat: touching a coin is never contested by anything else, and
       // `collect` is the one-shot latch, so the score cannot double-count an overlap that
