@@ -12,6 +12,7 @@ import {
 import type { TileGrid, TileKind } from '../src/physics/index.ts'
 import { createPlayer } from '../src/entities/player/index.ts'
 import type { Player, PlayerInput } from '../src/entities/player/index.ts'
+import { JUMP_STRETCH } from '../src/entities/player/player.ts'
 
 function makeGrid(rows: string[]): TileGrid {
   const height = rows.length
@@ -158,5 +159,69 @@ describe('buffered tap jump', () => {
       (JUMP_VELOCITY - GRAVITY * FIXED_DT) * JUMP_CUTOFF_FACTOR,
       10,
     )
+  })
+})
+
+describe('squash and stretch', () => {
+  const LEDGE = makeGrid([
+    '................',
+    '................',
+    '................',
+    '####............',
+    '................',
+    '................',
+    '................',
+    '################',
+  ])
+
+  test('the mesh is unscaled at rest and while walking', () => {
+    const player = onGround()
+
+    stepFor(player, 60, input({ moveX: 1, right: true }))
+
+    expect(player.mesh.scale.x).toBe(1)
+    expect(player.mesh.scale.y).toBe(1)
+    expect(player.mesh.scale.z).toBe(1)
+  })
+
+  test('the jump launch stretches Y and pinches X/Z to keep volume', () => {
+    const player = onGround()
+
+    player.step(FIXED_DT, input({ jump: true }))
+
+    expect(player.mesh.scale.y).toBeCloseTo(1 + JUMP_STRETCH, 10)
+    expect(player.mesh.scale.x).toBeCloseTo(1 / Math.sqrt(player.mesh.scale.y), 10)
+    expect(player.mesh.scale.z).toBeCloseTo(player.mesh.scale.x, 10)
+  })
+
+  test('the stretch fades with rising velocity and is neutral at the apex', () => {
+    const player = onGround()
+    player.step(FIXED_DT, input({ jump: true }))
+    let previous = player.mesh.scale.y
+    expect(previous).toBeGreaterThan(1)
+
+    while (player.body.velocity.y > 0) {
+      player.step(FIXED_DT, input({ jump: true }))
+      expect(player.mesh.scale.y).toBeLessThanOrEqual(previous)
+      previous = player.mesh.scale.y
+    }
+
+    expect(player.mesh.scale.y).toBeCloseTo(1, 10)
+  })
+
+  test('walking off a ledge falls without stretching', () => {
+    const player = settle(createPlayer({ x: 1, y: 5, grid: LEDGE }))
+
+    for (let i = 0; i < 240; i += 1) {
+      player.step(FIXED_DT, input({ moveX: 1, right: true }))
+      if (!player.grounded && player.body.velocity.y < 0) {
+        expect(player.mesh.scale.x).toBe(1)
+        expect(player.mesh.scale.y).toBe(1)
+        expect(player.mesh.scale.z).toBe(1)
+        return
+      }
+    }
+
+    throw new Error('player never walked off the ledge')
   })
 })

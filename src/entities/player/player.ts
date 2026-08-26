@@ -36,6 +36,11 @@ export const FACE_LEFT = Math.PI
 /** Exponential smoothing rate for the turn, per second. */
 export const TURN_RATE = 18
 
+// Squash and stretch is decoration: it drives mesh.scale only. body.aabb never changes size,
+// so the hitbox a player collides with is identical whether the mesh is stretched or not.
+/** Extra Y scale at jump launch: the mesh reaches 1.25 tall, then fades back with the rise. */
+export const JUMP_STRETCH = 0.25
+
 /** Steps `current` towards `target` without overshooting it. */
 function moveToward(current: number, target: number, maxDelta: number): number {
   const delta = target - current
@@ -65,6 +70,8 @@ export function createPlayer(options: PlayerOptions): Player {
   // A launched jump that has not yet spent its one cutoff. Latched per jump rather than read
   // off a live release edge, so a press buffered and released in mid-air still clips its arc.
   let cutPending = false
+  // Latched at launch rather than derived from "airborne", so walking off a ledge never stretches.
+  let stretching = false
   let targetYaw = FACE_RIGHT
 
   function step(dt: number, input: PlayerInput): void {
@@ -99,6 +106,7 @@ export function createPlayer(options: PlayerOptions): Player {
       velocity.y = JUMP_VELOCITY
       coyote.timeSinceGrounded = Number.POSITIVE_INFINITY
       cutPending = true
+      stretching = true
     } else if (cutPending && !input.jump && velocity.y > 0) {
       // 5. Variable jump: the first rising frame with the button not held clips the arc, once
       // per jump. A buffered press arrives already released, so it clips right after launch.
@@ -107,6 +115,7 @@ export function createPlayer(options: PlayerOptions): Player {
     }
 
     // 6. Collide. There is no wall jump and no wall slide: hitting a wall only zeroes vx.
+    const wasGrounded = player.grounded
     moveAndCollide(body, dt, grid, sweep)
     player.grounded = sweep.grounded
     updateCoyoteTimer(coyote, player.grounded, dt)
@@ -116,6 +125,15 @@ export function createPlayer(options: PlayerOptions): Player {
     player.facingYaw += (targetYaw - player.facingYaw) * Math.min(1, TURN_RATE * dt)
     mesh.rotation.y = player.facingYaw
     mesh.position.set(body.aabb.x + PLAYER_WIDTH / 2, body.aabb.y + PLAYER_HEIGHT / 2, GAMEPLAY_Z)
+
+    // 8. Squash and stretch. Mesh scale only — the simulation never reads it back.
+    if (!wasGrounded && player.grounded) stretching = false
+    const scaleY =
+      stretching && velocity.y > 0
+        ? 1 + JUMP_STRETCH * Math.min(1, velocity.y / JUMP_VELOCITY)
+        : 1
+    const scaleXZ = 1 / Math.sqrt(scaleY)
+    mesh.scale.set(scaleXZ, scaleY, scaleXZ)
 
     prevJump = input.jump
   }
