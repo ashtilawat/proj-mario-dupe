@@ -1,127 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import type {
-  SfxAudioContext,
-  SfxAudioNode,
-  SfxAudioParam,
-  SfxGainNode,
-  SfxName,
-  SfxOscillatorNode,
-} from '../src/audio/index.ts'
+import type { SfxName } from '../src/audio/index.ts'
+import {
+  FakeAudioContext,
+  installFakeAudioContext,
+  signatureOf,
+  uninstallFakeAudioContext,
+} from './helpers/fake-audio-context.ts'
 
 // jsdom ships no WebAudio, so every test drives the module through a fake context installed on
-// globalThis. The fakes implement the seam interfaces directly (no `any` casts), so a change to
-// those signatures breaks these tests at typecheck time instead of silently passing.
-
-type ParamCall = [method: string, value: number, time: number]
-
-class FakeAudioParam implements SfxAudioParam {
-  readonly calls: ParamCall[] = []
-
-  setValueAtTime(value: number, startTime: number): void {
-    this.calls.push(['setValueAtTime', value, startTime])
-  }
-
-  linearRampToValueAtTime(value: number, endTime: number): void {
-    this.calls.push(['linearRamp', value, endTime])
-  }
-
-  exponentialRampToValueAtTime(value: number, endTime: number): void {
-    this.calls.push(['exponentialRamp', value, endTime])
-  }
-}
-
-class FakeOscillatorNode implements SfxOscillatorNode {
-  type: OscillatorType = 'sine'
-  readonly frequency = new FakeAudioParam()
-  onended: (() => void) | null = null
-  startTime: number | null = null
-  stopTime: number | null = null
-  connectedTo: SfxAudioNode | null = null
-  disconnectCount = 0
-
-  connect(destination: SfxAudioNode): void {
-    this.connectedTo = destination
-  }
-
-  disconnect(): void {
-    this.disconnectCount += 1
-  }
-
-  start(when: number): void {
-    this.startTime = when
-  }
-
-  stop(when: number): void {
-    this.stopTime = when
-  }
-}
-
-class FakeGainNode implements SfxGainNode {
-  readonly gain = new FakeAudioParam()
-  connectedTo: SfxAudioNode | null = null
-  disconnectCount = 0
-
-  connect(destination: SfxAudioNode): void {
-    this.connectedTo = destination
-  }
-
-  disconnect(): void {
-    this.disconnectCount += 1
-  }
-}
-
-class FakeAudioContext implements SfxAudioContext {
-  currentTime = 0
-  state: AudioContextState = 'suspended'
-  readonly destination: SfxAudioNode = { connect: () => {}, disconnect: () => {} }
-  readonly oscillators: FakeOscillatorNode[] = []
-  readonly gains: FakeGainNode[] = []
-  resumeCalls = 0
-
-  createOscillator(): SfxOscillatorNode {
-    const oscillator = new FakeOscillatorNode()
-    this.oscillators.push(oscillator)
-    return oscillator
-  }
-
-  createGain(): SfxGainNode {
-    const gain = new FakeGainNode()
-    this.gains.push(gain)
-    return gain
-  }
-
-  resume(): Promise<void> {
-    this.resumeCalls += 1
-    this.state = 'running'
-    return Promise.resolve()
-  }
-}
-
-/** Installs a fake AudioContext constructor; returns the list it records its instances into. */
-function installFakeAudioContext(initialState: AudioContextState): FakeAudioContext[] {
-  const instances: FakeAudioContext[] = []
-  class RecordingAudioContext extends FakeAudioContext {
-    constructor() {
-      super()
-      this.state = initialState
-      instances.push(this)
-    }
-  }
-  Reflect.set(globalThis, 'AudioContext', RecordingAudioContext)
-  return instances
-}
+// globalThis. The fakes live in ./helpers because tests/sfx-oscillator.test.ts drives the same
+// seam from the other end — gameplay events rather than direct playSfx calls.
 
 /** Fresh module registry per test, so the lazily-created context singleton never leaks across. */
 async function loadAudio() {
   return await import('../src/audio/index.ts')
-}
-
-/** What makes one effect audibly different from another: waveform, pitch sweep, and length. */
-function signatureOf(oscillator: FakeOscillatorNode): string {
-  const start = oscillator.frequency.calls[0]
-  const end = oscillator.frequency.calls[1]
-  const duration = (oscillator.stopTime ?? 0) - (oscillator.startTime ?? 0)
-  return [oscillator.type, start?.[1], end?.[1], duration.toFixed(4)].join('|')
 }
 
 beforeEach(() => {
@@ -129,8 +21,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  Reflect.deleteProperty(globalThis, 'AudioContext')
-  Reflect.deleteProperty(globalThis, 'webkitAudioContext')
+  uninstallFakeAudioContext()
 })
 
 describe('playSfx context lifecycle', () => {
