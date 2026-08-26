@@ -391,8 +391,6 @@ describe('stomping', () => {
 /** One flat-coloured part of the merged geometry: its colour and local bounds. */
 interface Part {
   color: THREE.Color
-  minX: number
-  maxX: number
   minY: number
   maxY: number
   maxZ: number
@@ -421,8 +419,6 @@ function meshParts(geometry: THREE.BufferGeometry): Part[] {
     const part = byColor.get(key)
 
     if (part) {
-      part.minX = Math.min(part.minX, x)
-      part.maxX = Math.max(part.maxX, x)
       part.minY = Math.min(part.minY, y)
       part.maxY = Math.max(part.maxY, y)
       part.maxZ = Math.max(part.maxZ, z)
@@ -431,8 +427,6 @@ function meshParts(geometry: THREE.BufferGeometry): Part[] {
       const rgb = new THREE.Color(color.getX(i), color.getY(i), color.getZ(i))
       byColor.set(key, {
         color: rgb,
-        minX: x,
-        maxX: x,
         minY: y,
         maxY: y,
         maxZ: z,
@@ -644,6 +638,8 @@ describe('king mesh', () => {
     expect(flash.r + flash.g + flash.b).toBeGreaterThan(idle.r + idle.g + idle.b)
     expect(flash.r).toBeGreaterThan(idle.r)
     expect(flash.g).toBeGreaterThan(idle.g)
+    // Warmer, not just brighter — the old neutral gray flash cleared every bar above it.
+    expect(flash.r - flash.b).toBeGreaterThan(idle.r - idle.b)
 
     stepUntil(boss, (b) => b.state === 'attack')
     expect(boss.mesh.material.color.getHex()).toBe(idle.getHex())

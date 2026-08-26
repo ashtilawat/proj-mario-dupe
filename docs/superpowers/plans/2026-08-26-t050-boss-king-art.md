@@ -28,7 +28,7 @@ mesh has always been cosmetic and decoupled from the AABB.
 
 1. **Red.** Rewrite `describe('gray-box mesh')` in `tests/boss.test.ts` as
    `describe('king mesh')`, plus a `Part` interface and a `meshParts()` colour-partition
-   helper directly above it (same helper `tests/player-art.test.ts` uses). Twelve tests:
+   helper directly above it (same helper `tests/player-art.test.ts` uses). Thirteen tests:
    one disposable Mesh; per-vertex colour attribute; seven colour parts and a
    `BufferGeometry`; silhouette on budget and centred; still ≥ 3 tiles wide and tall;
    hitbox constants untouched; royal palette by channel relation; crown band overhangs the
@@ -70,13 +70,14 @@ silhouette budget, the way `MESH_SPAN_*` works for the player. `HALF_Y = 1.625`.
 | ermine collar | ±1.45 | 0.26 → 0.52 | 1.35 | `0xefe6d8` |
 | head | ±0.75 | 0.48 → 1.10 | 1.05 | `0x6f9e4a` |
 | crown band | ±0.90 | 1.05 → 1.35 | 1.20 | `0xd9a318` |
-| crown point ×3 | −0.81…−0.43, ±0.19, 0.43…0.81 | 1.32 → 1.625 | 1.20 | `0xffd75e` |
+| crown point ×3 | −0.70…−0.46, ±0.12, 0.46…0.70 | 1.32 → 1.625 | 1.18 | `0xffd75e` |
 | jewel | ±0.16 | 1.09 → 1.31 | 0.13 at z 0.615 | `0xd83c5e` |
 
 Two wide-over-narrow steps carry the read: the hem flares out past the torso (a robe) and
 the crown band overhangs the head (the same trick the player's hat brim uses). The points
-are a brighter gold than the band so they are their own colour part and the 0.24-tile gaps
-between them are testable. Joins overlap 0.03–0.05 tiles, so no seam can open. The
+are a brighter gold than the band so they are their own colour part and the 0.34-tile gaps
+between them are testable, and they run 0.02 shallower than the band they overlap so no two
+gold faces end up coplanar. Joins overlap 0.03–0.05 tiles, so no seam can open. The
 silhouette lands exactly on budget — 3.5 × 3.25 × 1.5 — centred on the origin.
 
 ## Risks

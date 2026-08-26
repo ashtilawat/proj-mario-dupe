@@ -150,9 +150,11 @@ const BOSS_PARTS: readonly BossPart[] = [
   { minX: -1.45, maxX: 1.45, minY: 0.26, maxY: 0.52, depth: 1.35, color: COLLAR_COLOR },
   { minX: -0.75, maxX: 0.75, minY: 0.48, maxY: 1.1, depth: 1.05, color: HEAD_COLOR },
   { minX: -0.9, maxX: 0.9, minY: 1.05, maxY: 1.35, depth: 1.2, color: CROWN_BAND_COLOR },
-  { minX: -0.7, maxX: -0.46, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
-  { minX: -0.12, maxX: 0.12, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
-  { minX: 0.46, maxX: 0.7, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
+  // Sunk 0.01 shallower than the band they overlap: equal depths would put their front and
+  // back faces on the band's own planes over the same x, which is where z-fighting starts.
+  { minX: -0.7, maxX: -0.46, minY: 1.32, maxY: HALF_Y, depth: 1.18, color: CROWN_POINT_COLOR },
+  { minX: -0.12, maxX: 0.12, minY: 1.32, maxY: HALF_Y, depth: 1.18, color: CROWN_POINT_COLOR },
+  { minX: 0.46, maxX: 0.7, minY: 1.32, maxY: HALF_Y, depth: 1.18, color: CROWN_POINT_COLOR },
   // Sunk 0.05 into the band and standing 0.08 clear of it, still inside BOSS_MESH_DEPTH.
   {
     minX: -0.16,
