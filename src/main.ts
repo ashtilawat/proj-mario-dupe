@@ -481,6 +481,21 @@ export function startGame(
   let invuln = 0
 
   /**
+   * T-037. The walkers whose CURRENT overlap with the player has already been accounted
+   * for. A walker can only bill on the frame its overlap begins, so one contact costs one
+   * life however long it lasts — `invuln` alone could not do this, because it is a plain
+   * wall-clock timer and a walker turning on a ledge can stay inside a standing player for
+   * longer than the window (T-034 measured 1.525 s at x = 13.8, which billed twice).
+   *
+   * The two are not redundant: the latch scopes a bill to one contact, while `invuln`
+   * scopes it to one moment, which is what keeps a jump into SEVERAL walkers at one life.
+   *
+   * Keyed on the walker itself, never `walker.id` — ids are per-level array indices and
+   * collide across levels.
+   */
+  const billed = new Set<Walker>()
+
+  /**
    * Last tick's jump button, so the jump sting can find the press edge. See `simulate` — and
    * `onSpaceDown`, which primes it so a keyboard press is not chirped twice.
    */
@@ -531,6 +546,11 @@ export function startGame(
     // a stomped walker comes back alive, on its spawn, facing the way the level says.
     walkers.splice(0, walkers.length, ...createWalkers(level))
     for (const walker of walkers) walkerLayer.add(walker.mesh)
+    // With the old walkers gone, every latched contact is over by definition. The latch is
+    // keyed on the walker itself, so the fresh ones are already unlatched and this changes
+    // no behaviour — it is here so the set cannot hold disposed walkers for a whole run.
+    // Here rather than in `restart` so a mid-run level swap clears it too.
+    billed.clear()
 
     // Coins and bosses follow the walkers exactly: dispose the old set, splice the shared
     // array in place, re-hang the meshes. Most levels have no boss, so `bosses` is usually
@@ -724,9 +744,9 @@ export function startGame(
 
       // A stomp is the walker's call: it checks the fall direction and the overlap, then
       // hands back the bounce to spend. Defeated walkers just stop being drawn. An overlap
-      // that is NOT a stomp is a side hit and costs a life, but only once per i-frame
-      // window. The window is armed on the spot, so a second walker overlapping in this
-      // same tick cannot bill a second life for one jump.
+      // that is NOT a stomp is a side hit and costs a life — once per contact, and at most
+      // once per i-frame window. The window is armed on the spot, so a second walker
+      // overlapping in this same tick cannot bill a second life for one jump.
       for (const walker of walkers) {
         const bounce = walker.tryStomp(player.body.aabb, prevVy, prevBottom)
         if (bounce !== 0) {
@@ -735,8 +755,21 @@ export function startGame(
           playSfx('stomp')
           continue
         }
-        if (!walker.alive || invuln > 0) continue
-        if (!overlaps(player.body.aabb, walker.aabb)) continue
+        // Not touching, or not a threat any more: whatever contact there was is over, so
+        // the next one is a fresh bump that may bill again. A stomped walker lands here on
+        // the next tick, which is what releases the latch for the one case above.
+        if (!walker.alive || !overlaps(player.body.aabb, walker.aabb)) {
+          billed.delete(walker)
+          continue
+        }
+        // Alive and overlapping. Only the frame the overlap BEGINS can bill.
+        if (billed.has(walker)) continue
+        // Latched BEFORE the window is consulted, deliberately: a walker first touched
+        // inside someone else's i-frames is part of that same bump, and leaving it
+        // unlatched would let it bill the instant the window lapsed — the very bug this
+        // latch exists to close, just spread over two walkers instead of one.
+        billed.add(walker)
+        if (invuln > 0) continue
         loseLife()
         invuln = HIT_IFRAMES_S
       }
