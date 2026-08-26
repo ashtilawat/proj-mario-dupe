@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
+import * as story from '../src/story/index.ts'
 import { WORLD_1_LEVEL_IDS, flagLines, tagline, title } from '../src/story/index.ts'
 
 describe('title and tagline', () => {
@@ -67,5 +69,83 @@ describe('flag line copy', () => {
 
   test('no two levels reuse the same line', () => {
     expect(new Set(Object.values(flagLines)).size).toBe(7)
+  })
+})
+
+const ALL_COPY = [title, tagline, ...Object.values(flagLines)]
+
+const SOURCE_FILES = ['world1.ts', 'index.ts'] as const
+
+function sourceOf(name: string): string {
+  // jsdom's global URL constructor mis-resolves relative specifiers against a file:// base
+  // (falls back to the document's http://localhost base instead), so build an absolute
+  // URL string ourselves rather than passing a relative specifier to `new URL(rel, base)`.
+  const testDir = import.meta.url.slice(0, import.meta.url.lastIndexOf('/'))
+  return readFileSync(new URL(`${testDir}/../src/story/${name}`), 'utf8')
+}
+
+describe('the copy is original and kid-friendly', () => {
+  test('borrows no trademarked character names', () => {
+    for (const line of ALL_COPY) {
+      expect(line, line).not.toMatch(
+        /\b(mario|luigi|peach|bowser|koopa|goomba|yoshi|toad|nintendo)\b/i,
+      )
+    }
+  })
+
+  test('uses no violent or unkind vocabulary', () => {
+    for (const line of ALL_COPY) {
+      expect(line, line).not.toMatch(
+        /\b(kill|kills|killed|die|dies|died|dead|death|blood|hate|hates|stupid|dumb)\b/i,
+      )
+    }
+  })
+
+  test('never shouts', () => {
+    for (const line of ALL_COPY) {
+      expect(line, line).not.toBe(line.toUpperCase())
+    }
+  })
+})
+
+describe('the module stays pure data', () => {
+  test('exports exactly the four approved values and nothing else', () => {
+    expect(Object.keys(story).sort()).toEqual([
+      'WORLD_1_LEVEL_IDS',
+      'flagLines',
+      'tagline',
+      'title',
+    ])
+  })
+
+  test('no export is a function', () => {
+    for (const [name, value] of Object.entries(story)) {
+      expect(typeof value, name).not.toBe('function')
+      expect(['string', 'object'], name).toContain(typeof value)
+    }
+  })
+
+  test('the source names no browser or engine runtime', () => {
+    for (const file of SOURCE_FILES) {
+      expect(sourceOf(file), file).not.toMatch(
+        /\b(document|window|globalThis|addEventListener|removeEventListener|requestAnimationFrame|setTimeout|setInterval|fetch|THREE)\b/,
+      )
+    }
+  })
+
+  test('imports nothing from outside src/story, so importing it can have no side effects', () => {
+    // Both `import x from 'y'` / `export { x } from 'y'` and bare `import 'y'`.
+    const specifiers = /(?:\bfrom\s*|^\s*import\s*)['"]([^'"]+)['"]/gm
+
+    for (const file of SOURCE_FILES) {
+      const found = [...sourceOf(file).matchAll(specifiers)].map((m) => m[1])
+      for (const specifier of found) {
+        expect(specifier, `${file} imports ${specifier}`).toMatch(/^\.\//)
+      }
+    }
+
+    // The barrel does import something, so a regex that silently matches nothing would
+    // pass the loop above vacuously. Prove it finds the real import.
+    expect([...sourceOf('index.ts').matchAll(specifiers)].length).toBeGreaterThan(0)
   })
 })
