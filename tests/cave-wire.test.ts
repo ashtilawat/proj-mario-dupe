@@ -233,6 +233,21 @@ describe('the cave is where the live camera can see it', () => {
       expect(top).toBeGreaterThan(floor)
       expect(base).toBeLessThan(ceiling)
     }
+
+    // Overlap alone holds for any lift in roughly (2, 8), so a wrong constant would ship green.
+    // This pins the real one: the corridor of void between the two rock rows — the band the
+    // level is meant to sit in — has to straddle the camera's own centre line, which is exactly
+    // what reconciling the two frames means. Rows are told apart by their base point, which the
+    // art parks outside the frustum on both sides.
+    const cameraY = game.app.camera.position.y
+    const baseY = (mass: THREE.Mesh): number => mass.getWorldPosition(new THREE.Vector3()).y
+    const ceilingRow = rock.filter((mass) => baseY(mass) > cameraY)
+    const floorRow = rock.filter((mass) => baseY(mass) <= cameraY)
+    // Guards the two spans below: either row being empty would make them vacuous.
+    expect(floorRow.length).toBeGreaterThan(0)
+    expect(ceilingRow.length).toBeGreaterThan(0)
+    expect(spanOf(floorRow, 'y')[1]).toBeLessThan(cameraY)
+    expect(spanOf(ceilingRow, 'y')[0]).toBeGreaterThan(cameraY)
   })
 
   test('keeps rock across the whole screen once the camera has travelled', () => {
@@ -248,12 +263,13 @@ describe('the cave is where the live camera can see it', () => {
     const [left, right] = visibleX(game)
     const [rockLeft, rockRight] = spanOf(rockOf(game.scene), 'x')
 
-    // Guards the two below: they are vacuous if the camera never actually moved.
+    // Both guard the two spans below, and both come first so a failure names its own cause
+    // rather than surfacing as a confusing span diff: the assertions are vacuous if the camera
+    // never actually moved, and meaningless if a level swap has taken the cave away.
     expect(game.app.camera.position.x).toBeGreaterThan(startX)
+    expect(caveIn(game.scene).visible).toBe(true)
     expect(rockLeft).toBeLessThanOrEqual(left)
     expect(rockRight).toBeGreaterThanOrEqual(right)
-    // Still underground: a swap would have hidden the cave and made the spans meaningless.
-    expect(caveIn(game.scene).visible).toBe(true)
   })
 })
 
@@ -307,8 +323,10 @@ describe('disposing the run releases the cave', () => {
     game.dispose()
     started = null
 
-    // The cave's teardown shares its traversal with the backdrop's; this is what notices if
-    // that extraction ever drops the group it was extracted from.
+    // Narrow on purpose. This is the hills' unparenting, which now stands beside the cave's.
+    // It does NOT cover the shared `disposeGroupArt` walk — dropping the hills' call to that
+    // leaves this green — and it deliberately does not duplicate what already covers it:
+    // tests/backdrop-wire.test.ts counts the hills' own geometry and material disposals.
     expect(hills.parent).toBeNull()
   })
 })
