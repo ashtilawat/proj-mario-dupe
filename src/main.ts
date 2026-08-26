@@ -492,8 +492,23 @@ export function startGame(
    *
    * Keyed on the walker itself, never `walker.id` — ids are per-level array indices and
    * collide across levels.
+   *
+   * T-038. The value is how long that walker has been CLEAR of the player, in seconds — 0
+   * while they are touching. T-037 released the latch on the first frame the AABBs came
+   * apart, which read every gap as the end of the contact; but the 1-1 walker's pit-rim turn
+   * puts a gap of a couple of frames in the middle of one bump, and the player standing
+   * where the pit jump lands (x ~ 14.2) was billed again the moment it walked back in. So
+   * the latch now outlives the gap and only lifts after CONTACT_RELEASE_S of clear air.
    */
-  const billed = new Set<Walker>()
+  const billed = new Map<Walker, number>()
+
+  /**
+   * How long the player must stay clear of a walker before the next touch counts as a new
+   * contact rather than the same one. Tied to the mercy window on purpose: a bump the
+   * player has not yet walked a full window away from is still that bump. Below this, the
+   * walker turning around on a ledge reads as leaving and coming back.
+   */
+  const CONTACT_RELEASE_S = HIT_IFRAMES_S
 
   /**
    * Last tick's jump button, so the jump sting can find the press edge. See `simulate` — and
@@ -548,7 +563,7 @@ export function startGame(
     for (const walker of walkers) walkerLayer.add(walker.mesh)
     // With the old walkers gone, every latched contact is over by definition. The latch is
     // keyed on the walker itself, so the fresh ones are already unlatched and this changes
-    // no behaviour — it is here so the set cannot hold disposed walkers for a whole run.
+    // no behaviour — it is here so the map cannot hold disposed walkers for a whole run.
     // Here rather than in `restart` so a mid-run level swap clears it too.
     billed.clear()
 
@@ -755,20 +770,30 @@ export function startGame(
           playSfx('stomp')
           continue
         }
-        // Not touching, or not a threat any more: whatever contact there was is over, so
-        // the next one is a fresh bump that may bill again. A stomped walker lands here on
-        // the next tick, which is what releases the latch for the one case above.
+        // Not touching, or not a threat any more. The contact is NOT over yet: a walker
+        // reversing on a ledge steps out of the player and straight back in, and T-037
+        // released here, on that first clear frame, so the walk back in bought a second
+        // life. Age the latch instead, and only lift it once the player has been clear for
+        // a whole CONTACT_RELEASE_S — that, not a single frame apart, is a separation.
+        // A stomped walker ages out down this same path.
         if (!walker.alive || !overlaps(player.body.aabb, walker.aabb)) {
-          billed.delete(walker)
+          const clearFor = billed.get(walker)
+          if (clearFor === undefined) continue
+          const next = clearFor + dt
+          if (next >= CONTACT_RELEASE_S) billed.delete(walker)
+          else billed.set(walker, next)
           continue
         }
-        // Alive and overlapping. Only the frame the overlap BEGINS can bill.
-        if (billed.has(walker)) continue
+        // Alive and overlapping, so any clear time it had banked is spent: the contact is
+        // live again, and the next gap has to run the full window from here.
+        const alreadyBilled = billed.has(walker)
         // Latched BEFORE the window is consulted, deliberately: a walker first touched
         // inside someone else's i-frames is part of that same bump, and leaving it
         // unlatched would let it bill the instant the window lapsed — the very bug this
         // latch exists to close, just spread over two walkers instead of one.
-        billed.add(walker)
+        billed.set(walker, 0)
+        // Only the frame the overlap BEGINS can bill.
+        if (alreadyBilled) continue
         if (invuln > 0) continue
         loseLife()
         invuln = HIT_IFRAMES_S

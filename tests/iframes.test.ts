@@ -1,4 +1,5 @@
-// T-037 — i-frame billing: one unbroken contact with a walker costs exactly one life.
+// T-037/T-038 — i-frame billing: one contact with a walker costs exactly one life, and a
+// walker turning around on a ledge is still that same contact rather than a second one.
 //
 // The bug this file exists for was found and measured by T-034, which was fenced to
 // walker.ts and reported it back rather than fixing it. `invuln` in main.ts is a plain 1 s
@@ -238,5 +239,57 @@ describe('what the latch must not swallow', () => {
     game.loop.tick(STEP)
 
     expect(game.hud.getState().lives).toBe(START_LIVES - 2)
+  })
+})
+
+describe('T-038 — the mushroom reverse is not a new contact', () => {
+  /**
+   * T-037 shipped a latch that released on the FIRST frame the AABBs stopped touching, so
+   * any gap at all — however brief — made the next overlap a fresh bill. The x = 13.8 repro
+   * above never separates (the walker's ledge turn happens INSIDE the player), which is why
+   * it stayed green while live play did not.
+   *
+   * Stand a tile further right, at x = 14.2, and the walker clears the player by a couple of
+   * tenths of a tile before the pit rim turns it around and walks it straight back in. That
+   * is one bump and one reverse, not two bumps: standing still on solid ground after the pit
+   * cost a second life ~1.1 s in, and the pacing drained the run to GAME OVER.
+   *
+   * x = 14.2 is inside the x ~ 13.3-14.7 landing spread from the pit jump, so this is the
+   * golden path too — it is the same bump the player above takes, from four tenths further on.
+   */
+  test('one bump plus the walker turning back in stays at one life (x = 14.2)', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    standAt(game, 14.2)
+
+    let contacted = false
+    let separated = false
+    let touchedAgain = false
+    let billedAt = -1
+    let lowestAfterBill = START_LIVES
+
+    // 5 s: long enough to cover the whole in-out-in-out pass, and far past the 1.5 s the
+    // second bill used to land inside.
+    for (let i = 0; i < 600; i += 1) {
+      game.loop.tick(STEP)
+      const touching = overlaps(game.player.body.aabb, walker.aabb)
+      if (touching) contacted = true
+      else if (contacted) separated = true
+      if (touching && separated) touchedAgain = true
+
+      const lives = game.hud.getState().lives
+      if (billedAt < 0 && lives < START_LIVES) billedAt = i
+      if (billedAt >= 0) lowestAfterBill = Math.min(lowestAfterBill, lives)
+    }
+
+    // The overlap really did break and resume — otherwise this test proves nothing that
+    // the x = 13.8 one does not.
+    expect(separated).toBe(true)
+    expect(touchedAgain).toBe(true)
+
+    // One bump, one life, and it holds for the rest of the pass.
+    expect(billedAt).toBeGreaterThanOrEqual(0)
+    expect(lowestAfterBill).toBe(START_LIVES - 1)
+    expect(game.hud.getState().lives).toBe(START_LIVES - 1)
   })
 })
