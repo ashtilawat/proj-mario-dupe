@@ -10,7 +10,7 @@ import {
   WALK_MAX,
 } from '../src/physics/index.ts'
 import type { TileGrid, TileKind } from '../src/physics/index.ts'
-import { createPlayer } from '../src/entities/player/index.ts'
+import { PLAYER_HEIGHT, PLAYER_WIDTH, createPlayer } from '../src/entities/player/index.ts'
 import type { Player, PlayerInput } from '../src/entities/player/index.ts'
 import { JUMP_STRETCH, LAND_SQUASH_MAX } from '../src/entities/player/player.ts'
 
@@ -285,5 +285,21 @@ describe('squash and stretch', () => {
     expect(player.mesh.scale.x).toBe(1)
     expect(player.mesh.scale.y).toBe(1)
     expect(player.mesh.scale.z).toBe(1)
+  })
+
+  test('squash and stretch never touch the hitbox', () => {
+    const player = onGround()
+    let sawScaledMesh = false
+
+    for (let i = 0; i < 400; i += 1) {
+      player.step(FIXED_DT, input({ jump: i < 40 }))
+      expect(player.body.aabb.w).toBe(PLAYER_WIDTH)
+      expect(player.body.aabb.h).toBe(PLAYER_HEIGHT)
+      expect(player.mesh.position.x).toBeCloseTo(player.body.aabb.x + PLAYER_WIDTH / 2, 10)
+      expect(player.mesh.position.y).toBeCloseTo(player.body.aabb.y + PLAYER_HEIGHT / 2, 10)
+      if (player.mesh.scale.y !== 1) sawScaledMesh = true
+    }
+
+    expect(sawScaledMesh).toBe(true)
   })
 })
