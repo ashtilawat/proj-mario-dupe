@@ -133,15 +133,12 @@ describe('the bob is active only when grounded and walking', () => {
     expect(Math.max(...lifts)).toBeGreaterThan(BOB_AMPLITUDE / 2)
     // ...and it comes back down, rather than parking at a constant offset.
     expect(Math.min(...lifts)).toBeLessThan(BOB_AMPLITUDE / 10)
-    // Never below the rest pose and never above the cap. The +1e-9 slack (vs. a bare
-    // toBeLessThanOrEqual) absorbs the float round-trip through mesh.position: storing
-    // aabb.y + PLAYER_HEIGHT / 2 + bob and reading bobLift back out via subtraction is not
-    // bit-exact for every base, so near the peak of the arc this can read ~5.5e-17 above
-    // BOB_AMPLITUDE despite bob itself never exceeding it. See task-2-report.md for the
-    // reduction (deviation from the brief's verbatim assertion, flagged for review).
+    // Never below the rest pose and never above the cap. bobLift subtracts the hitbox
+    // centre off an already-rounded sum (mesh.position.y is IEEE 754 float64), so the
+    // recovered lift can sit one ULP above the cap; the upper bound slack is exactly that.
     for (const lift of lifts) {
       expect(lift).toBeGreaterThanOrEqual(0)
-      expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE + 1e-9)
+      expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE + Number.EPSILON * Math.abs(player.mesh.position.y))
     }
   })
 
