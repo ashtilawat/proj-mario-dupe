@@ -1,4 +1,15 @@
 import * as THREE from 'three'
+import { createInput, createLoop } from './engine/index.ts'
+import type { Loop } from './engine/index.ts'
+import { createDashInput, createPlayer } from './entities/player/index.ts'
+import type { Player } from './entities/player/index.ts'
+import { decodeTiles, loadLevel } from './levels/index.ts'
+import type { TileGrid, TileKind } from './physics/index.ts'
+import { GAMEPLAY_Z, createLights } from './render/index.ts'
+import { createHud } from './ui/index.ts'
+import type { Hud } from './ui/index.ts'
+import { createDebugOverlay } from './debug/index.ts'
+import type { DebugBody, DebugOverlay } from './debug/index.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
 export const FRUSTUM_HEIGHT = 10
@@ -95,19 +106,171 @@ export function boot(
   return app
 }
 
-/** Browser entry point. Boots the renderer and starts the render loop. */
+/** The level World 1-1 boots into. */
+export const START_LEVEL = '1-1'
+
+/** Camera height, in tiles. The 10-tile frustum then covers the whole 12-tile level. */
+export const CAMERA_Y = 5
+
+/** Flat gray so the boxes read as blockout geometry, not art. */
+export const TILE_COLOR = 0x8b8b93
+
+/**
+ * A {@link TileGrid} over a level's decoded GIDs. Tiled rows run top-down while physics Y
+ * runs up, so row 0 of the RLE is the TOP row and has to be flipped: ty = 0 is the floor.
+ * One tile is one world unit here — TILE_SIZE is a render-only conversion this game skips.
+ */
+export function createTileGridFromLevel(id: string): TileGrid {
+  const level = loadLevel(id)
+  const [width, height] = level.size
+  const decoded = decodeTiles(level.tiles, width, height)
+
+  return {
+    width,
+    height,
+    tileSize: 1,
+    getTile(tx: number, ty: number): TileKind {
+      if (tx < 0 || tx >= width || ty < 0 || ty >= height) return 'empty'
+      const gid = decoded[(height - 1 - ty) * width + tx] ?? 0
+      return gid > 0 ? 'solid' : 'empty'
+    },
+  }
+}
+
+/**
+ * Every solid tile as one instanced 1x1 quad batch, so the whole level is a single draw
+ * call. Instance i is centred on its tile: tile (tx, ty) spans [tx, tx+1) x [ty, ty+1).
+ */
+export function createTileMesh(grid: TileGrid): THREE.InstancedMesh {
+  let count = 0
+  for (let ty = 0; ty < grid.height; ty += 1) {
+    for (let tx = 0; tx < grid.width; tx += 1) {
+      if (grid.getTile(tx, ty) === 'solid') count += 1
+    }
+  }
+
+  const geometry = new THREE.PlaneGeometry(1, 1)
+  const material = new THREE.MeshLambertMaterial({ color: TILE_COLOR })
+  const mesh = new THREE.InstancedMesh(geometry, material, count)
+  mesh.name = 'tiles'
+
+  const dummy = new THREE.Object3D()
+  let i = 0
+  for (let ty = 0; ty < grid.height; ty += 1) {
+    for (let tx = 0; tx < grid.width; tx += 1) {
+      if (grid.getTile(tx, ty) !== 'solid') continue
+      dummy.position.set(tx + 0.5, ty + 0.5, GAMEPLAY_Z)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(i, dummy.matrix)
+      i += 1
+    }
+  }
+  mesh.instanceMatrix.needsUpdate = true
+  return mesh
+}
+
+export interface Game {
+  app: App
+  scene: THREE.Scene
+  player: Player
+  hud: Hud
+  loop: Loop
+  grid: TileGrid
+  overlay: DebugOverlay
+  dispose(): void
+}
+
+/**
+ * Boots the renderer and fills the scene it handed back with the playable World 1-1:
+ * lights, the tile batch, the player capsule and the debug overlay. `boot` and
+ * `createScene` stay deliberately empty — the game lives here.
+ */
+export function startGame(
+  container: HTMLElement,
+  createRenderer: RendererFactory = createWebGLRenderer,
+  size: Size = { width: window.innerWidth, height: window.innerHeight },
+): Game {
+  const app = boot(container, createRenderer, size)
+  const { scene, camera } = app
+
+  const grid = createTileGridFromLevel(START_LEVEL)
+  const level = loadLevel(START_LEVEL)
+  const [spawnX, spawnY] = level.spawn
+
+  const { directional, hemisphere } = createLights()
+  const tiles = createTileMesh(grid)
+  const player = createPlayer({ x: spawnX, y: spawnY, grid })
+  const overlay = createDebugOverlay()
+  scene.add(directional, hemisphere, tiles, player.mesh, overlay.group)
+
+  const hud = createHud()
+  hud.mount(container)
+
+  const input = createInput()
+  const dash = createDashInput()
+  input.attach(window)
+  dash.attach(window)
+
+  // Reused every frame so a 120 Hz loop allocates nothing for the overlay.
+  const debugVelocity = { vx: 0, vy: 0 }
+  const debugBodies: DebugBody[] = [{ aabb: player.body.aabb, velocity: debugVelocity }]
+
+  const loop = createLoop({
+    input,
+    simulate(dt, state) {
+      player.step(dt, dash.poll(state))
+    },
+    render() {
+      followPlayer(camera, player, grid)
+      debugVelocity.vx = player.body.velocity.x
+      debugVelocity.vy = player.body.velocity.y
+      overlay.setBodies(debugBodies)
+      app.render()
+    },
+  })
+  loop.start()
+
+  return {
+    app,
+    scene,
+    player,
+    hud,
+    loop,
+    grid,
+    overlay,
+    dispose() {
+      loop.stop()
+      input.detach()
+      dash.detach()
+      overlay.dispose()
+      hud.unmount()
+      tiles.geometry.dispose()
+      ;(tiles.material as THREE.Material).dispose()
+      tiles.removeFromParent()
+      app.dispose()
+    },
+  }
+}
+
+/** Tracks the player horizontally, clamped so the camera never leaves the level. */
+function followPlayer(camera: THREE.OrthographicCamera, player: Player, grid: TileGrid): void {
+  const halfWidth = (camera.right - camera.left) / 2
+  const centerX = player.body.aabb.x + player.body.aabb.w / 2
+  const minX = halfWidth
+  const maxX = grid.width - halfWidth
+  camera.position.x = maxX <= minX ? grid.width / 2 : Math.min(Math.max(centerX, minX), maxX)
+  camera.position.y = CAMERA_Y
+}
+
+/** Browser entry point. Starts World 1-1 and keeps it sized to the window. */
 function main(): void {
   const container = document.getElementById('app')
   if (!container) throw new Error('#app container not found')
 
-  const app = boot(container)
-  window.addEventListener('resize', () => app.resize(window.innerWidth, window.innerHeight))
-
-  const loop = (): void => {
-    app.render()
-    window.requestAnimationFrame(loop)
-  }
-  window.requestAnimationFrame(loop)
+  const game = startGame(container)
+  window.addEventListener('resize', () =>
+    game.app.resize(window.innerWidth, window.innerHeight),
+  )
 }
 
 if (typeof document !== 'undefined' && document.getElementById('app')) {
