@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
+import { tagline as storyTagline } from '../src/story/index.ts'
 import { createHud, createTitle } from '../src/ui/index.ts'
 import type { Title } from '../src/ui/index.ts'
 import { DEFAULT_HEADING, PROMPT_TEXT } from '../src/ui/title.ts'
@@ -26,6 +27,38 @@ describe('createTitle', () => {
   test('accepts a custom heading', () => {
     const title = createTitle({ heading: 'WORLD 1-1' })
     expect(title.element.querySelector('[data-title-heading]')?.textContent).toBe('WORLD 1-1')
+  })
+})
+
+describe('title tagline', () => {
+  test('renders the story tagline, not a copy of it kept in the UI layer', () => {
+    // Guard the comparison below: it would pass against an empty node if the story
+    // module's tagline were ever emptied out.
+    expect(storyTagline).not.toBe('')
+    const title = createTitle()
+    const line = title.element.querySelector('[data-title-tagline]')
+    expect(line?.tagName).toBe('P')
+    expect(line?.textContent).toBe(storyTagline)
+  })
+
+  test('sits between the heading and the prompt', () => {
+    const title = createTitle()
+    const hooks = [...title.element.children].map((el) =>
+      Object.keys((el as HTMLElement).dataset).join(),
+    )
+    expect(hooks).toEqual(['titleHeading', 'titleTagline', 'titlePrompt'])
+  })
+
+  test('appears when only a heading is passed, as main.ts does', () => {
+    // main.ts calls createTitle({ heading: storyTitle }) and passes no tagline. This is
+    // the test that proves the live card shows one without main.ts having to change.
+    const title = createTitle({ heading: 'WORLD 1-1' })
+    expect(title.element.querySelector('[data-title-tagline]')?.textContent).toBe(storyTagline)
+  })
+
+  test('accepts a custom tagline', () => {
+    const title = createTitle({ tagline: 'A tiny light.' })
+    expect(title.element.querySelector('[data-title-tagline]')?.textContent).toBe('A tiny light.')
   })
 })
 

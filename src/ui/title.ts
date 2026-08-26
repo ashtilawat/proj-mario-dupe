@@ -1,3 +1,7 @@
+// The card's default second line. `main.ts` builds the live title with a heading only, so
+// the tagline has to come from here or it would never reach the screen.
+import { tagline as storyTagline } from '../story/index.ts'
+
 export interface Title {
   readonly element: HTMLElement
   readonly visible: boolean
@@ -9,6 +13,7 @@ export interface Title {
 
 export interface TitleOptions {
   heading?: string
+  tagline?: string
 }
 
 export const DEFAULT_HEADING = 'UNTITLED 2.5D PLATFORMER'
@@ -57,6 +62,15 @@ export function createTitle(options: TitleOptions = {}): Title {
   heading.style.fontWeight = '700'
   heading.style.letterSpacing = '0.12em'
 
+  const tagline = document.createElement('p')
+  tagline.dataset.titleTagline = ''
+  tagline.textContent = options.tagline ?? storyTagline
+  tagline.style.margin = '0'
+  tagline.style.fontSize = '16px'
+  tagline.style.fontWeight = '500'
+  tagline.style.letterSpacing = '0.04em'
+  tagline.style.opacity = '0.9'
+
   const prompt = document.createElement('p')
   prompt.dataset.titlePrompt = ''
   prompt.textContent = PROMPT_TEXT
@@ -66,7 +80,7 @@ export function createTitle(options: TitleOptions = {}): Title {
   prompt.style.letterSpacing = '0.08em'
   prompt.style.opacity = '0.85'
 
-  root.append(heading, prompt)
+  root.append(heading, tagline, prompt)
 
   // A fresh title starts visible; the DOM is built once and only toggled after.
   let visible = true

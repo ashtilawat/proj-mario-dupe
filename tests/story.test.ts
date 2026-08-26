@@ -9,7 +9,7 @@ describe('title and tagline', () => {
   })
 
   test('the tagline is the approved line', () => {
-    expect(tagline).toBe('Hop far. Land soft.')
+    expect(tagline).toBe('Carry the lantern home, one hop at a time.')
   })
 
   test('both are trimmed, non-empty, and short enough for an overlay', () => {
@@ -47,14 +47,22 @@ describe('flagLines shape', () => {
 describe('flag line copy', () => {
   test('each level gets its approved line', () => {
     expect(flagLines).toEqual({
-      '1-1': 'First hill down! The sky waves you on.',
-      '1-2': 'You out-hopped the wobblers. Nice feet!',
-      '1-3': 'Out of the dark, and the lanterns stayed lit.',
-      '1-4': 'Over the creek, and not one wet sock!',
-      '1-5': 'Up where the clouds nap. Keep climbing!',
-      '1-6': 'The castle gate is just past these trees.',
-      '1-castle': 'The lantern is home. World 2 is waking up.',
+      '1-1': 'One hill down, Pip. The lantern is still lit.',
+      '1-2': 'Past the wobblers! The paper hills roll on.',
+      '1-3': 'Through the dark cave, and the lantern held on.',
+      '1-4': 'Back in the sunshine. Shake off that cave dust!',
+      '1-5': 'Up where the clouds nap. Castle towers ahead!',
+      '1-6': 'The paper king left the gate open. Almost home!',
+      '1-castle': 'The lantern is home, Pip. World 2 is waking up.',
     })
+  })
+
+  test('the copy tells one arc a kid can follow: a lantern, a cave, then home', () => {
+    // The landmarks, not the wording — copy can be punched up again without touching this,
+    // but the arc cannot quietly lose the cave in the middle or the homecoming at the end.
+    expect(tagline).toMatch(/lantern/i)
+    expect(flagLines['1-3']).toMatch(/cave/i)
+    expect(flagLines['1-castle']).toMatch(/home/i)
   })
 
   test('every line is short, trimmed, and closes cleanly', () => {

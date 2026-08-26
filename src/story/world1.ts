@@ -10,7 +10,7 @@ export type World1LevelId = '1-1' | '1-2' | '1-3' | '1-4' | '1-5' | '1-6' | '1-c
 export const title = 'Pip and the Paper Hills'
 
 /** One line under the title. */
-export const tagline = 'Hop far. Land soft.'
+export const tagline = 'Carry the lantern home, one hop at a time.'
 
 /** A line for every World 1 level. */
 export type FlagLines = Readonly<Record<World1LevelId, string>>
@@ -27,15 +27,16 @@ export const WORLD_1_LEVEL_IDS = [
 ] as const satisfies readonly World1LevelId[]
 
 /**
- * Shown when the player touches a level's flag. The arc runs across the hills,
- * past the wobblers, and up to the castle to bring the lantern home.
+ * Shown when the player touches a level's flag. Read in play order they tell one
+ * story: Pip carries a lantern over the paper hills, through the dark cave at 1-3,
+ * back out into the sun, and up past the paper king's gate to bring it home.
  */
 export const flagLines: FlagLines = {
-  '1-1': 'First hill down! The sky waves you on.',
-  '1-2': 'You out-hopped the wobblers. Nice feet!',
-  '1-3': 'Out of the dark, and the lanterns stayed lit.',
-  '1-4': 'Over the creek, and not one wet sock!',
-  '1-5': 'Up where the clouds nap. Keep climbing!',
-  '1-6': 'The castle gate is just past these trees.',
-  '1-castle': 'The lantern is home. World 2 is waking up.',
+  '1-1': 'One hill down, Pip. The lantern is still lit.',
+  '1-2': 'Past the wobblers! The paper hills roll on.',
+  '1-3': 'Through the dark cave, and the lantern held on.',
+  '1-4': 'Back in the sunshine. Shake off that cave dust!',
+  '1-5': 'Up where the clouds nap. Castle towers ahead!',
+  '1-6': 'The paper king left the gate open. Almost home!',
+  '1-castle': 'The lantern is home, Pip. World 2 is waking up.',
 }
