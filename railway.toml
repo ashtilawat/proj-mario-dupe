@@ -1,0 +1,19 @@
+# T-011 — Railway deploy config for a static Vite + three.js SPA.
+#
+# Railpack detects the Node/Vite project, runs the build, and serves the
+# static output through Caddy with SPA client-routing fallback.
+#
+# Deliberately NOT set here:
+#   - deploy.startCommand — a custom start command disables Caddy's static
+#     SPA serving and would make Railway expect a long-running server.
+#   - variables — railway.toml has no variables key. RAILPACK_SPA_OUTPUT_DIR
+#     is set as a Railway service variable instead (see README.md).
+
+[build]
+builder = "RAILPACK"
+buildCommand = "npm run build"
+
+[deploy]
+healthcheckPath = "/"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
