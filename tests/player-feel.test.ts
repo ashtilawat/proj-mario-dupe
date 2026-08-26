@@ -12,7 +12,7 @@ import {
 import type { TileGrid, TileKind } from '../src/physics/index.ts'
 import { createPlayer } from '../src/entities/player/index.ts'
 import type { Player, PlayerInput } from '../src/entities/player/index.ts'
-import { JUMP_STRETCH } from '../src/entities/player/player.ts'
+import { JUMP_STRETCH, LAND_SQUASH_MAX } from '../src/entities/player/player.ts'
 
 function makeGrid(rows: string[]): TileGrid {
   const height = rows.length
@@ -223,5 +223,67 @@ describe('squash and stretch', () => {
     }
 
     throw new Error('player never walked off the ledge')
+  })
+
+  function jumpUntilLanding(player: Player): void {
+    const held = input({ jump: true })
+    player.step(FIXED_DT, held)
+    for (let i = 0; i < 600; i += 1) {
+      if (player.grounded) return
+      player.step(FIXED_DT, held)
+    }
+    throw new Error('player never landed')
+  }
+
+  function landingScaleY(holdFrames: number): number {
+    const player = onGround()
+    for (let i = 0; i < 600; i += 1) {
+      player.step(FIXED_DT, input({ jump: i < holdFrames }))
+      if (player.grounded) return player.mesh.scale.y
+    }
+    throw new Error('player never landed')
+  }
+
+  test('landing squashes Y and spreads X/Z', () => {
+    const player = onGround()
+
+    jumpUntilLanding(player)
+
+    expect(player.mesh.scale.y).toBeLessThan(1)
+    expect(player.mesh.scale.x).toBeGreaterThan(1)
+    expect(player.mesh.scale.y).toBeGreaterThanOrEqual(1 - LAND_SQUASH_MAX)
+  })
+
+  test('a full-height landing squats to about LAND_SQUASH_MAX', () => {
+    const landed = landingScaleY(Number.POSITIVE_INFINITY)
+
+    expect(landed).toBeGreaterThanOrEqual(1 - LAND_SQUASH_MAX)
+    expect(landed).toBeLessThan(1 - LAND_SQUASH_MAX + 0.02)
+  })
+
+  test('a harder landing squashes deeper than a short hop', () => {
+    const hop = landingScaleY(1)
+    const full = landingScaleY(Number.POSITIVE_INFINITY)
+
+    expect(full).toBeLessThan(hop)
+    expect(hop).toBeLessThan(1)
+  })
+
+  test('spawn settling is not a landing', () => {
+    const player = settle(createPlayer({ x: 2, y: 1, grid: flatGround(64, 8) }))
+
+    expect(player.mesh.scale.y).toBe(1)
+  })
+
+  test('the landing squash recovers to exactly (1, 1, 1)', () => {
+    const player = onGround()
+    jumpUntilLanding(player)
+    expect(player.mesh.scale.y).toBeLessThan(1)
+
+    stepFor(player, 30)
+
+    expect(player.mesh.scale.x).toBe(1)
+    expect(player.mesh.scale.y).toBe(1)
+    expect(player.mesh.scale.z).toBe(1)
   })
 })
