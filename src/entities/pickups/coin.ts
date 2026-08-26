@@ -49,6 +49,19 @@ export class Coin {
       GAMEPLAY_Z,
     )
   }
+
+  /**
+   * Take this coin. Hiding the disc is idempotent; the return value is not, so a caller can
+   * score exactly once however many frames the overlap lasts.
+   *
+   * @returns true only on the call that collected it.
+   */
+  collect(): boolean {
+    if (this.collected) return false
+    this.collected = true
+    this.mesh.visible = false
+    return true
+  }
 }
 
 /** Factory taking a level spawn point. */
