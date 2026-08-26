@@ -135,23 +135,34 @@ export const START_LEVEL = '1-1'
 export const CAMERA_Y = 5
 
 /**
- * The level a boot or a warp lands on: whatever `#level=<id>` names, when the loader knows
- * it. A missing, unreadable or unknown id is World 1-1 — no URL a player can type should
- * be able to hand `applyLevel` an id that throws halfway through swapping the world out.
- * Probing with `loadLevel` is how that is settled here rather than at the call site.
+ * The level `hash` actually names, or null for a hash that names none: missing, unreadable,
+ * or an id the loader does not know. Probing with `loadLevel` is how that last one is settled
+ * here rather than at the call site — no URL a player can type should be able to hand
+ * `applyLevel` an id that throws halfway through swapping the world out.
+ *
+ * Null is the whole point of this returning what it does. A boot turns it into START_LEVEL
+ * below, because a fresh load has to land somewhere. A warp must NOT: see `onHashChange`.
+ */
+function warpTarget(hash: string): string | null {
+  const id = parseLevelHash(hash)
+  if (!id) return null
+  try {
+    loadLevel(id)
+  } catch {
+    return null
+  }
+  return id
+}
+
+/**
+ * The level a boot lands on: whatever `#level=<id>` names, when the loader knows it, and
+ * World 1-1 for every hash that names nothing.
  *
  * Deliberately not consulted by `restart`: the end cards always go back to START_LEVEL, so
  * a hash-booted run that ends still starts over at 1-1.
  */
-function hashLevel(): string {
-  const id = parseLevelHash(window.location.hash)
-  if (!id) return START_LEVEL
-  try {
-    loadLevel(id)
-  } catch {
-    return START_LEVEL
-  }
-  return id
+function hashLevel(hash: string): string {
+  return warpTarget(hash) ?? START_LEVEL
 }
 
 /**
@@ -443,6 +454,15 @@ export function startGame(
   createRenderer: RendererFactory = createWebGLRenderer,
   size: Size = { width: window.innerWidth, height: window.innerHeight },
 ): Game {
+  // T-048, and the FIRST thing this function does, deliberately: the level a run boots on is
+  // frozen from the address bar before anything else has had a chance to run. The read used
+  // to happen at the bottom of `startGame`, after the renderer, the canvas and the whole
+  // scene were built — and live, something outside this bundle cleared the hash inside that
+  // window, so a `#level=1-castle` boot came up as 1-1. Nothing in src writes `location.hash`
+  // (this and `onHashChange` are the only reads of it), so the game cannot stop the strip.
+  // It can refuse to be timed out by it.
+  const bootHash = window.location.hash
+
   const app = boot(container, createRenderer, size)
   const { scene, camera } = app
 
@@ -783,20 +803,42 @@ export function startGame(
   }
 
   /**
-   * A warp: the address bar changed, so the world follows it. Same rule as the boot below,
-   * which is the point — a link pasted mid-run lands on exactly the level it would have
-   * booted into. The title card is not touched either way: on boot it is still up over the
-   * frozen opening pose, and mid-run it is already down.
+   * A warp: the address bar changed, so the world follows it — when the new hash names a
+   * level. A link pasted mid-run therefore lands on exactly the level it would have booted
+   * into. The title card is not touched either way: on boot it is still up over the frozen
+   * opening pose, and mid-run it is already down.
+   *
+   * T-048. A hash naming NO level is not a warp instruction and no longer moves the run.
+   * This used to read `hashLevel()`, so an empty hash — a strip, a `#` from some control on
+   * the page, anything at all — meant START_LEVEL, and one of those was enough to drop a
+   * warped run onto 1-1 grass. That is the bug QA saw, and it is not the parser's: the hash
+   * had already been emptied by the time this ran.
+   *
+   * The run also puts its own level back in the address bar, so the URL keeps naming where
+   * the player actually is. `replaceState` rather than `location.hash =`, which would fire
+   * another hashchange straight back into here.
+   *
+   * 1-1 restores too, and that is the case it was written for. QA saw GAME OVER on 1-1 throw
+   * itself back to the title about half a second later with nobody touching a key, which is
+   * what a fresh load of `/` looks like. This handler cannot do that — it loads no level,
+   * raises no title and restarts nothing on a strip — but it CAN stop leaving a bare URL
+   * behind on the one level every GAME OVER sits on. Skipping the restore on 1-1 because a
+   * bare URL boots there anyway is exactly backwards.
    */
   function onHashChange(): void {
-    applyLevel(hashLevel())
+    const target = warpTarget(window.location.hash)
+    if (target !== null) {
+      applyLevel(target)
+      return
+    }
+    window.history.replaceState(window.history.state, '', `#level=${currentId}`)
   }
 
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
   window.addEventListener('hashchange', onHashChange)
 
-  applyLevel(hashLevel())
+  applyLevel(hashLevel(bootHash))
 
   const loop = createLoop({
     input,

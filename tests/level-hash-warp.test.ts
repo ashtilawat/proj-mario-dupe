@@ -124,8 +124,10 @@ describe('hashchange mid-run', () => {
 
     warpTo('#level=nope')
 
-    // Back to 1-1 rather than stuck on the castle: an unreadable hash means START_LEVEL.
-    expect(game.grid.width).toBe(24)
+    // T-048: still the castle. A hash naming no level the loader knows is not an instruction
+    // to go anywhere — it used to mean START_LEVEL, which is what turned a stripped hash on
+    // a warped run into 1-1. Boot still falls back to 1-1; a warp no longer does.
+    expect(game.grid.width).toBe(18)
   })
 
   test('stops listening once the game is disposed', () => {
@@ -154,4 +156,161 @@ describe('restart after a hash boot', () => {
     expect(game.grid.width).toBe(24)
     expect(game.bosses.length).toBe(0)
   })
+})
+
+/**
+ * T-048. Live, `#level=1-castle` booted the castle and then came back as 1-1 grass with the
+ * hash gone from the address bar. Nothing in this bundle writes `location.hash` — the only
+ * `window.location` in the whole of src is the read in `hashLevel` — so whatever strips it
+ * is outside the game: the shell the page is embedded in, an extension, the host. What the
+ * game did with that strip is the bug, and it is entirely ours: the boot read the hash at
+ * the very END of `startGame`, long after the renderer was built, and `onHashChange` mapped
+ * every empty or unknown hash onto START_LEVEL. One strip, and a warped run was 1-1.
+ *
+ * So the level a run boots on is now frozen from a snapshot taken before anything else runs,
+ * and a hash that names no level it knows is not a warp instruction at all.
+ */
+
+/** Boots like `start`, running `onBoot` from inside the renderer factory — mid-`startGame`. */
+function startDuring(onBoot: () => void) {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const game = startGame(
+    container,
+    () => {
+      onBoot()
+      return stubRenderer() as unknown as THREE.WebGLRenderer
+    },
+    { width: 800, height: 400 },
+  )
+  started = game
+  return { container, game }
+}
+
+/** A strip: the hash goes away, and the browser tells the page about it. */
+function stripHash(): void {
+  window.location.hash = ''
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
+describe('a hash stripped out from under a warped run', () => {
+  test('boots the level the URL named even if the hash is gone by the time the world loads', () => {
+    window.location.hash = '#level=1-castle'
+
+    const { game } = startDuring(() => {
+      window.location.hash = ''
+    })
+
+    expect(game.grid.width).toBe(18)
+    expect(game.bosses.length).toBe(1)
+  })
+
+  test('keeps the warped level when the hash is stripped after boot', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+
+    stripHash()
+
+    expect(game.grid.width).toBe(18)
+    expect(game.bosses.length).toBe(1)
+  })
+
+  test('puts the stripped hash back in the address bar', () => {
+    window.location.hash = '#level=1-castle'
+    start()
+
+    stripHash()
+
+    expect(window.location.hash).toContain('1-castle')
+  })
+
+  test('keeps the warped level, and the hash, across the Enter that starts the run', () => {
+    window.location.hash = '#level=1-castle'
+    const { container, game } = start()
+
+    pressEnter(container)
+
+    expect(game.grid.width).toBe(18)
+    expect(game.bosses.length).toBe(1)
+    expect(window.location.hash).toContain('1-castle')
+  })
+
+  test('leaves a plain 1-1 run on 1-1, and names it in the bar', () => {
+    const { game } = start()
+
+    warpTo('#nonsense')
+
+    expect(game.grid.width).toBe(24)
+    // 1-1 restores like every other level. A bare bar is what a reload of `/` boots from,
+    // and 1-1 is exactly where the GAME OVER card lives — see the card test below.
+    expect(window.location.hash).toContain('level=1-1')
+  })
+})
+
+/**
+ * T-048, second half. QA then saw GAME OVER on 1-1 throw itself back to the TITLE about half
+ * a second after it came up, with nobody touching a key. A full load of `/` — no hash — boots
+ * exactly that: title card, 1-1 underneath. Same strip, one step further along.
+ *
+ * The first cut of this fix returned early on 1-1 rather than restoring, on the grounds that
+ * a bare URL is where 1-1 boots from anyway and there was no hash to invent. That is the one
+ * case where it matters most: 1-1 is where every GAME OVER sits. So every level restores now,
+ * 1-1 included, and a strip does nothing else at all — it does not load a level, does not
+ * raise the title, does not restart the run. The card stays exactly as the player left it.
+ */
+function endCard(container: HTMLElement): HTMLElement {
+  const element = container.querySelector<HTMLElement>('[data-game-overlay]')
+  if (!element) throw new Error('no end-card overlay in the container')
+  return element
+}
+
+describe('a hash stripped while GAME OVER is up on 1-1', () => {
+  /** A run played from the title down to a dead stop on 1-1, the way QA reached it. */
+  function gameOverOn1_1(hash: string) {
+    window.location.hash = hash
+    const { container, game } = start()
+    pressEnter(container)
+    for (let i = 0; i < START_LIVES; i++) fallInPit(game)
+    expect(game.hud.getState().lives).toBe(0)
+    expect(endCard(container).dataset.mode).toBe('gameover')
+    return { container, game }
+  }
+
+  for (const hash of ['', '#level=1-1']) {
+    const from = hash === '' ? 'a bare URL' : hash
+
+    test(`leaves the card up, booted from ${from}`, () => {
+      const { container } = gameOverOn1_1(hash)
+
+      stripHash()
+
+      expect(endCard(container).dataset.mode).toBe('gameover')
+      expect(endCard(container).style.display).not.toBe('none')
+    })
+
+    test(`does not restart the run, booted from ${from}`, () => {
+      const { game } = gameOverOn1_1(hash)
+
+      stripHash()
+
+      expect(game.hud.getState().lives).toBe(0)
+    })
+
+    test(`leaves the title down, booted from ${from}`, () => {
+      const { game } = gameOverOn1_1(hash)
+
+      stripHash()
+
+      expect(game.title.visible).toBe(false)
+    })
+
+    test(`keeps 1-1 loaded and names it in the bar, booted from ${from}`, () => {
+      const { game } = gameOverOn1_1(hash)
+
+      stripHash()
+
+      expect(game.grid.width).toBe(24)
+      expect(window.location.hash).toContain('1-1')
+    })
+  }
 })
