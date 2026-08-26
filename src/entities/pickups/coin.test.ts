@@ -25,15 +25,77 @@ describe('createCoin', () => {
   })
 })
 
+/** Radial extents of one flat-coloured part of the merged disc, keyed by its vertex colour. */
+function partRadii(geometry: THREE.BufferGeometry): Map<string, { min: number; max: number }> {
+  const position = geometry.getAttribute('position')
+  const color = geometry.getAttribute('color')
+  const byColor = new Map<string, { min: number; max: number }>()
+
+  for (let i = 0; i < position.count; i += 1) {
+    const radius = Math.hypot(position.getX(i), position.getY(i))
+    const key = [color.getX(i), color.getY(i), color.getZ(i)].join(',')
+    const part = byColor.get(key)
+    if (part) {
+      part.min = Math.min(part.min, radius)
+      part.max = Math.max(part.max, radius)
+    } else {
+      byColor.set(key, { min: radius, max: radius })
+    }
+  }
+
+  return byColor
+}
+
 describe('coin mesh', () => {
   test('is a disc exactly one tile across, in world units', () => {
-    const coin = createCoin({ x: 0, y: 0 })
-    // Radius, not diameter: half a tile each way spans TILE_SIZE world units.
-    expect(coin.mesh.geometry.parameters.radius).toBeCloseTo(TILE_SIZE / 2, 5)
+    const geometry = createCoin({ x: 0, y: 0 }).mesh.geometry
+    geometry.computeBoundingBox()
+    const size = geometry.boundingBox!.getSize(new THREE.Vector3())
+
+    // Measured off the silhouette rather than a primitive's radius parameter: the disc is
+    // merged from three parts now, so there is no single `parameters.radius` to read.
+    expect(size.x).toBeCloseTo(TILE_SIZE, 5)
+    expect(size.y).toBeCloseTo(TILE_SIZE, 5)
+    // Coplanar parts, so the spinning disc still goes edge-on rather than showing a slab.
+    expect(size.z).toBe(0)
   })
 
-  test('is painted COIN_COLOR', () => {
-    expect(createCoin({ x: 0, y: 0 }).mesh.material.color.getHex()).toBe(COIN_COLOR)
+  test('is a stamped disc: rim, face and stamp, nested and vertex-coloured', () => {
+    const geometry = createCoin({ x: 0, y: 0 }).mesh.geometry
+    const parts = [...partRadii(geometry).values()].sort((a, b) => b.max - a.max)
+
+    // Asserted before the destructure, so a fourth part or two parts sharing a colour fails
+    // as a length mismatch rather than as an undefined read below.
+    expect(parts).toHaveLength(3)
+    const [rim, face, stamp] = parts as [
+      { min: number; max: number },
+      { min: number; max: number },
+      { min: number; max: number },
+    ]
+
+    // The parts tile the disc exactly: each one's inner edge is the next one's outer edge.
+    // Four places, not more: these radii are hypots of float32 positions.
+    expect(rim.max).toBeCloseTo(TILE_SIZE / 2, 4)
+    expect(rim.min).toBeCloseTo(face.max, 4)
+    expect(face.min).toBeCloseTo(stamp.max, 4)
+    expect(stamp.min).toBeCloseTo(0, 4)
+  })
+
+  test('is one Mesh drawn by one vertex-coloured Lambert material', () => {
+    const mesh = createCoin({ x: 0, y: 0 }).mesh
+
+    // main.ts frees a coin with `mesh.geometry.dispose(); mesh.material.dispose()`.
+    expect(mesh.children).toHaveLength(0)
+    expect(Array.isArray(mesh.material)).toBe(false)
+    expect(mesh.material).toBeInstanceOf(THREE.MeshLambertMaterial)
+    expect(mesh.material.vertexColors).toBe(true)
+    expect(mesh.geometry.groups).toHaveLength(0)
+  })
+
+  test('leaves the material white, so COIN_COLOR reaches the face untinted', () => {
+    // Lambert multiplies material.color by the vertex colour; COIN_COLOR now lives in the
+    // face's vertex colours, asserted in tests/coin-stamp.test.ts.
+    expect(createCoin({ x: 0, y: 0 }).mesh.material.color.getHex()).toBe(0xffffff)
   })
 
   test('COIN_COLOR reads as yellow: red and green high, blue low', () => {
