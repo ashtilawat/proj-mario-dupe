@@ -155,7 +155,8 @@ describe('backdrop clouds', () => {
 
       // Flattened, or it reads as a ball rather than a cloud.
       expect(cloud.scale.x).toBeGreaterThan(cloud.scale.y * 1.5)
-      // Up in open sky, clear of the far ridge line.
+      // Up in the sky half of the frame. A cloud can still overlap a hilltop below it —
+      // CLOUD_LOCAL_Z keeps it in front, so that overlap depth-sorts rather than z-fights.
       expect(cloud.position.y).toBeGreaterThan(0)
       // In front of every hill, so an overlap depth-sorts instead of z-fighting.
       expect(cloud.position.z).toBeGreaterThan(frontmostHillZ)
