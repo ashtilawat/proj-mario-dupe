@@ -1223,11 +1223,13 @@ export function startGame(
         boss.mesh.material.dispose()
       }
       for (const flag of flagArt) flag.dispose()
-      // Both background groups, through the same de-duplicating walk: see `disposeGroupArt`.
+      // All three background groups, through the same de-duplicating walk: see `disposeGroupArt`.
       disposeGroupArt(backdrop)
       disposeGroupArt(caveBackdrop)
+      disposeGroupArt(castleBackdrop)
       backdrop.removeFromParent()
       caveBackdrop.removeFromParent()
+      castleBackdrop.removeFromParent()
       walkerLayer.removeFromParent()
       coinLayer.removeFromParent()
       bossLayer.removeFromParent()
@@ -1251,9 +1253,11 @@ function followPlayer(camera: THREE.OrthographicCamera, player: Player, grid: Ti
  * Every geometry and material hanging under `group`, disposed exactly once each.
  *
  * The sets are the whole point: a backdrop group shares one geometry across every hill and one
- * material across every cloud, and the cave shares one sphere across all six rock masses and one
- * cone across all five formations. A per-mesh loop would dispose the shared ones over and over.
- * The counts themselves deliberately stay in src/render.
+ * material across every cloud, the cave shares one sphere across all six rock masses and one cone
+ * across all five formations, and the castle hangs fifteen meshes off seven resources — one plane
+ * across the wall and both banners, one box across all seven pillars, one shape across all five
+ * arches, two stone materials across the pillars and the arches both. A per-mesh loop would
+ * dispose the shared ones over and over. The counts themselves deliberately stay in src/render.
  */
 function disposeGroupArt(group: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>()

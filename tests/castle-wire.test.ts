@@ -334,3 +334,65 @@ describe('the castle rides the camera', () => {
     expect(castleIn(game.scene).visible).toBe(true)
   })
 })
+
+function materialsOf(mesh: THREE.Mesh): THREE.Material[] {
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+}
+
+describe('disposing the run releases the castle', () => {
+  test('unparents the group', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+    const castle = castleIn(game.scene)
+
+    game.dispose()
+    started = null
+
+    expect(castle.parent).toBeNull()
+    expect(objectsNamed(game.scene, 'castle-backdrop')).toHaveLength(0)
+  })
+
+  test('disposes every geometry and material it owns, exactly once each', () => {
+    window.location.hash = '#level=1-castle'
+    const { game } = start()
+    const meshes = meshesOf(castleIn(game.scene))
+    const geometries = new Set(meshes.map((mesh) => mesh.geometry))
+    const materials = new Set(meshes.flatMap(materialsOf))
+    // Guards the count below, and states the premise: there are strictly MORE meshes than unique
+    // resources, so a per-mesh loop and a de-duplicating one give different answers. Empty sets
+    // would also make the loops vacuously true.
+    expect(geometries.size).toBeGreaterThan(0)
+    expect(materials.size).toBeGreaterThan(0)
+    expect(meshes.length).toBeGreaterThan(geometries.size + materials.size)
+
+    // Counting calls, not unique resources: the group shares one plane across the wall and both
+    // banners, one box across all seven pillars, one arch shape across all five bays, and its two
+    // stone materials across pillars and arches both. A naive per-mesh loop would fire these
+    // several times over and a Set on the receiving end would hide it.
+    let calls = 0
+    const count = (): void => {
+      calls += 1
+    }
+    for (const geometry of geometries) geometry.addEventListener('dispose', count)
+    for (const material of materials) material.addEventListener('dispose', count)
+
+    game.dispose()
+    started = null
+
+    expect(calls).toBe(geometries.size + materials.size)
+  })
+
+  test('still releases the hills and the cave', () => {
+    const { game } = start()
+    const hills = hillsIn(game.scene)
+    const cave = caveIn(game.scene)
+
+    game.dispose()
+    started = null
+
+    // The castle's teardown shares `disposeGroupArt` with both of its neighbours; this is what
+    // notices if the two new lines ever displace the four they sit beside.
+    expect(hills.parent).toBeNull()
+    expect(cave.parent).toBeNull()
+  })
+})
