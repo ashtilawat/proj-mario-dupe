@@ -5,6 +5,8 @@ import type { TileGrid, TileKind } from '../src/physics/index.ts'
 import {
   JUMP_STRETCH,
   LAND_SQUASH_MAX,
+  MESH_SPAN_X,
+  MESH_SPAN_Y,
   PLAYER_HEIGHT,
   PLAYER_WIDTH,
   createPlayer,
@@ -50,7 +52,7 @@ function onGround(): Player {
 
 /** One flat-coloured part of the merged geometry: its colour and local bounds. */
 interface Part {
-  color: string
+  color: THREE.Color
   minX: number
   maxX: number
   minY: number
@@ -81,7 +83,8 @@ function meshParts(geometry: THREE.BufferGeometry): Part[] {
       part.maxY = Math.max(part.maxY, y)
       part.halfWidth = Math.max(part.halfWidth, Math.abs(x))
     } else {
-      byColor.set(key, { color: key, minX: x, maxX: x, minY: y, maxY: y, halfWidth: Math.abs(x) })
+      const rgb = new THREE.Color(color.getX(i), color.getY(i), color.getZ(i))
+      byColor.set(key, { color: rgb, minX: x, maxX: x, minY: y, maxY: y, halfWidth: Math.abs(x) })
     }
   }
 
@@ -120,34 +123,79 @@ describe('player character mesh', () => {
     const mesh = createPlayerMesh()
 
     expect(mesh.geometry).not.toBeInstanceOf(THREE.CapsuleGeometry)
-    // Hat red, head yellow, overalls blue, shoes brown: the capsule had exactly one colour.
-    expect(meshParts(mesh.geometry)).toHaveLength(4)
+    // Crown, brim, head, overalls, shoes: the capsule had exactly one colour.
+    expect(meshParts(mesh.geometry)).toHaveLength(5)
   })
 
-  test('sits inside the player hitbox, centred on the origin', () => {
+  test('fills its own silhouette bounds, centred on the origin', () => {
     const geometry = createPlayerMesh().geometry
     geometry.computeBoundingBox()
     const box = geometry.boundingBox!
     const size = box.getSize(new THREE.Vector3())
 
-    expect(size.y).toBeCloseTo(PLAYER_HEIGHT, 6)
-    expect(size.x).toBeLessThanOrEqual(PLAYER_WIDTH + 1e-9)
+    // Measured against the art's own spans, not the hitbox: the whole point of MESH_SPAN_* is
+    // that retuning PLAYER_HEIGHT must not drag the character with it.
+    expect(size.y).toBeCloseTo(MESH_SPAN_Y, 6)
+    expect(size.x).toBeLessThanOrEqual(MESH_SPAN_X + 1e-9)
+    // A width floor too: `size.x <= MESH_SPAN_X` alone is satisfied by a sliver.
+    expect(size.x).toBeGreaterThan(MESH_SPAN_X / 2)
+    // Depth is bounded as well, or a part could balloon towards the camera unnoticed.
+    expect(box.min.z).toBeGreaterThanOrEqual(-MESH_SPAN_X)
+    expect(box.max.z).toBeLessThanOrEqual(MESH_SPAN_X)
     // step() parks the mesh on the hitbox centre, so an off-centre silhouette would sink the
     // feet into the floor or float them above it.
     const center = box.getCenter(new THREE.Vector3())
     expect(center.y).toBeCloseTo(0, 6)
   })
 
-  test('reads as a character: the hat brim overhangs the head, shoes at the bottom', () => {
+  test('the art fits inside the hitbox', () => {
+    // The ONE place the art is tied to the hitbox, so the coupling is stated rather than
+    // smeared across every dimension assertion.
+    expect(MESH_SPAN_X).toBeLessThanOrEqual(PLAYER_WIDTH)
+    expect(MESH_SPAN_Y).toBeLessThanOrEqual(PLAYER_HEIGHT)
+  })
+
+  test('is painted in the character palette, not arbitrary colours', () => {
+    const [crown, brim, head, overalls, shoes] = meshParts(createPlayerMesh().geometry) as [
+      Part,
+      Part,
+      Part,
+      Part,
+      Part,
+    ]
+
+    // Asserted as channel ratios, not hex: THREE.Color runs a hex through the working colour
+    // space, so the stored values are not the literals in player.ts.
+    for (const red of [crown, brim]) {
+      expect(red.color.r).toBeGreaterThan(red.color.g)
+      expect(red.color.r).toBeGreaterThan(red.color.b)
+    }
+    // The brim is the shaded underside of the same hat, so it must be darker but still red.
+    expect(brim.color.r).toBeLessThan(crown.color.r)
+    // The head keeps the established player yellow, so the player stays the only yellow thing
+    // on screen and the T-021 colour language survives.
+    expect(head.color.r).toBeGreaterThan(head.color.b)
+    expect(head.color.g).toBeGreaterThan(head.color.b)
+    expect(overalls.color.b).toBeGreaterThan(overalls.color.r)
+    expect(overalls.color.b).toBeGreaterThan(overalls.color.g)
+    expect(shoes.color.r).toBeGreaterThan(shoes.color.g)
+    expect(shoes.color.g).toBeGreaterThan(shoes.color.b)
+    // Shoes are the darkest part: a bright sole would fight the silhouette.
+    expect(shoes.color.r).toBeLessThan(crown.color.r)
+  })
+
+  test('reads as a character: the brim overhangs both the crown and the head', () => {
     const parts = meshParts(createPlayerMesh().geometry)
-    const hat = parts[0]!
-    const head = parts[1]!
+    const [crown, brim, head] = parts as [Part, Part, Part]
     const shoes = parts[parts.length - 1]!
 
-    // The wide-over-narrow silhouette is what makes the top read as a hat, not a block.
-    expect(hat.halfWidth).toBeGreaterThan(head.halfWidth)
-    expect(hat.maxY).toBeGreaterThan(head.maxY)
-    expect(shoes.minY).toBeCloseTo(-PLAYER_HEIGHT / 2, 6)
+    // Wide-over-narrow, twice: this is what makes the top say "hat" rather than "block".
+    // The brim carries its own colour precisely so this overhang is visible to a test — with
+    // one shared hat colour the two parts merge and a brimless slab sails through.
+    expect(brim.halfWidth).toBeGreaterThan(crown.halfWidth)
+    expect(brim.halfWidth).toBeGreaterThan(head.halfWidth)
+    expect(crown.maxY).toBeCloseTo(MESH_SPAN_Y / 2, 6)
+    expect(shoes.minY).toBeCloseTo(-MESH_SPAN_Y / 2, 6)
   })
 
   test('overlaps at every join, so no seam can open', () => {
@@ -162,12 +210,12 @@ describe('player character mesh', () => {
 
   test('has a front, so the facing turn is visible', () => {
     const parts = meshParts(createPlayerMesh().geometry)
-    const hat = parts[0]!
+    const brim = parts[1]!
     const shoes = parts[parts.length - 1]!
 
     // The capsule was rotationally symmetric about Y, so player.ts's TURN_RATE lerp on
     // mesh.rotation.y drew nothing. Front-heavy shoes and brim make the turn legible.
-    expect(hat.maxX).toBeGreaterThan(Math.abs(hat.minX))
+    expect(brim.maxX).toBeGreaterThan(Math.abs(brim.minX))
     expect(shoes.maxX).toBeGreaterThan(Math.abs(shoes.minX))
   })
 })
@@ -191,7 +239,8 @@ describe('player art leaves the simulation alone', () => {
     const player = onGround()
     player.step(FIXED_DT, input({ jump: true }))
 
-    // One root object scaling as a whole is exactly what the merged geometry buys us.
+    // player-feel.test.ts already covers this on the default mesh; pinned here too so an art
+    // change that broke root scaling fails in the art suite rather than somewhere else.
     expect(player.mesh.scale.y).toBeCloseTo(1 + JUMP_STRETCH, 10)
     expect(player.mesh.scale.x).toBeCloseTo(1 / Math.sqrt(player.mesh.scale.y), 10)
     expect(player.mesh.scale.z).toBeCloseTo(player.mesh.scale.x, 10)

@@ -69,23 +69,33 @@ function horizontalIntent(input: PlayerInput): number {
 // this codebase uses on entity meshes is `mesh.geometry.dispose(); mesh.material.dispose()`,
 // which a Group of children would leak straight past.
 const HAT_COLOR = 0xe0392b
+/** The brim, a shade darker than the crown: it reads as shadowed, and it is the part that
+ * carries the overhang, so it is worth being able to see on its own. */
+const BRIM_COLOR = 0xb92d21
 const HEAD_COLOR = 0xe8c547
 const OVERALLS_COLOR = 0x2e5bbf
 const SHOES_COLOR = 0x4a2f1b
 
 /**
- * The art's own silhouette size, in tiles. Deliberately NOT the PLAYER_WIDTH/PLAYER_HEIGHT
+ * The art's own silhouette bounds, in tiles. Deliberately NOT the PLAYER_WIDTH/PLAYER_HEIGHT
  * hitbox constants: sizing art off the hitbox means retuning the hitbox silently deforms the
- * character. They happen to match today, so the character fills the box the capsule did.
+ * character. Exported so the art tests can measure the character against these and check
+ * `MESH_SPAN_* <= PLAYER_*` in one place, rather than measuring every part against the hitbox.
+ *
+ * MESH_SPAN_Y is exact — the character spans it sole to hat. MESH_SPAN_X is a BUDGET rather
+ * than a measurement: the art is ~0.61 across, because the back of the character sits closer
+ * in than the front. Interior proportions are authored in the table below, not derived from
+ * these, so widening a span moves the parts that reference it and leaves the rest put.
  *
  * Unscaled by TILE_SIZE, unlike `walker.ts`. `step` positions this mesh in raw tile units
  * (`body.aabb.x + PLAYER_WIDTH / 2`), so scaling the geometry would decouple the art from
  * its own placement.
  */
-const MESH_SPAN_X = 0.7
-const MESH_SPAN_Y = 1.5
-/** Every part is placed relative to the mesh centre, so half spans are what the table needs. */
-const HALF_X = MESH_SPAN_X / 2
+export const MESH_SPAN_X = 0.7
+export const MESH_SPAN_Y = 1.5
+/** How far the toe and the hat brim reach forward: the art's widest point, and its front. */
+const FRONT_X = MESH_SPAN_X / 2
+/** Half the height, since every part is placed relative to the mesh centre. */
 const HALF_Y = MESH_SPAN_Y / 2
 
 /** One flat-coloured box of the character, as local bounds around the mesh centre. */
@@ -110,10 +120,10 @@ interface PlayerPart {
  * Neighbours overlap in Y by ~0.02 so no join can open a seam or z-fight.
  */
 const PLAYER_PARTS: readonly PlayerPart[] = [
-  { minX: -0.2, maxX: HALF_X, minY: -HALF_Y, maxY: -0.59, depth: 0.44, color: SHOES_COLOR },
+  { minX: -0.2, maxX: FRONT_X, minY: -HALF_Y, maxY: -0.59, depth: 0.44, color: SHOES_COLOR },
   { minX: -0.26, maxX: 0.26, minY: -0.62, maxY: -0.05, depth: 0.4, color: OVERALLS_COLOR },
   { minX: -0.23, maxX: 0.23, minY: -0.07, maxY: 0.35, depth: 0.42, color: HEAD_COLOR },
-  { minX: -0.24, maxX: HALF_X, minY: 0.33, maxY: 0.45, depth: 0.5, color: HAT_COLOR },
+  { minX: -0.24, maxX: FRONT_X, minY: 0.33, maxY: 0.45, depth: 0.5, color: BRIM_COLOR },
   { minX: -0.21, maxX: 0.21, minY: 0.43, maxY: HALF_Y, depth: 0.4, color: HAT_COLOR },
 ]
 
