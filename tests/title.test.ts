@@ -42,10 +42,12 @@ describe('title tagline', () => {
   })
 
   test('sits between the heading and the prompt', () => {
+    // T-056 put the three lines on a [data-title-paper] card, so the reading order lives
+    // one level down from the overlay root now.
     const title = createTitle()
-    const hooks = [...title.element.children].map((el) =>
-      Object.keys((el as HTMLElement).dataset).join(),
-    )
+    const paper = title.element.querySelector<HTMLElement>('[data-title-paper]')
+    expect(paper).not.toBeNull()
+    const hooks = [...paper!.children].map((el) => Object.keys((el as HTMLElement).dataset).join())
     expect(hooks).toEqual(['titleHeading', 'titleTagline', 'titlePrompt'])
   })
 

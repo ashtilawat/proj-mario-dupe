@@ -19,6 +19,14 @@ export interface TitleOptions {
 export const DEFAULT_HEADING = 'UNTITLED 2.5D PLATFORMER'
 export const PROMPT_TEXT = 'Press Enter'
 
+/**
+ * The same paper stock the HUD is cut from. Deliberately duplicated rather than imported:
+ * hud.ts keeps these private, and reaching into it would couple the two overlays.
+ */
+const PAPER = '#f4ead2'
+const PAPER_EDGE = '#e0d0a8'
+const INK = '#3a2a18'
+
 // Shared by applyOverlayStyle() and render() so the shown display value cannot drift.
 const VISIBLE_DISPLAY = 'flex'
 
@@ -37,10 +45,32 @@ function applyOverlayStyle(el: HTMLElement): void {
   el.style.alignItems = 'center'
   el.style.gap = '24px'
   el.style.boxSizing = 'border-box'
-  el.style.background = 'rgba(16, 16, 20, 0.72)'
+  // Not a curtain any more: just enough wash to settle the frame behind the paper, so the
+  // level still reads through it while the card stays the thing you look at.
+  el.style.background = 'rgba(58, 42, 24, 0.22)'
   el.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace'
-  el.style.color = '#fff'
-  el.style.textShadow = '0 1px 0 #000'
+}
+
+/** A cream card with a soft edge, matching the HUD's. */
+function applyPaperStyle(el: HTMLElement): void {
+  el.style.display = 'flex'
+  el.style.flexDirection = 'column'
+  el.style.justifyContent = 'center'
+  el.style.alignItems = 'center'
+  el.style.gap = '18px'
+  el.style.padding = '28px 40px'
+  el.style.boxSizing = 'border-box'
+  el.style.background = PAPER
+  el.style.border = '1px solid ' + PAPER_EDGE
+  el.style.borderRadius = '6px'
+  el.style.boxShadow = '0 2px 0 rgba(58, 42, 24, 0.18)'
+  el.style.textAlign = 'center'
+}
+
+/** Ink on paper — and explicitly no text-shadow, which would smear on cream. */
+function applyInkStyle(el: HTMLElement): void {
+  el.style.color = INK
+  el.style.textShadow = 'none'
 }
 
 /**
@@ -53,6 +83,10 @@ export function createTitle(options: TitleOptions = {}): Title {
   root.dataset.titleRoot = ''
   applyOverlayStyle(root)
 
+  const paper = document.createElement('div')
+  paper.dataset.titlePaper = ''
+  applyPaperStyle(paper)
+
   const heading = document.createElement('h1')
   heading.dataset.titleHeading = ''
   heading.textContent = options.heading ?? DEFAULT_HEADING
@@ -61,6 +95,7 @@ export function createTitle(options: TitleOptions = {}): Title {
   heading.style.fontSize = '32px'
   heading.style.fontWeight = '700'
   heading.style.letterSpacing = '0.12em'
+  applyInkStyle(heading)
 
   const tagline = document.createElement('p')
   tagline.dataset.titleTagline = ''
@@ -70,6 +105,7 @@ export function createTitle(options: TitleOptions = {}): Title {
   tagline.style.fontWeight = '500'
   tagline.style.letterSpacing = '0.04em'
   tagline.style.opacity = '0.9'
+  applyInkStyle(tagline)
 
   const prompt = document.createElement('p')
   prompt.dataset.titlePrompt = ''
@@ -79,8 +115,10 @@ export function createTitle(options: TitleOptions = {}): Title {
   prompt.style.fontWeight = '600'
   prompt.style.letterSpacing = '0.08em'
   prompt.style.opacity = '0.85'
+  applyInkStyle(prompt)
 
-  root.append(heading, tagline, prompt)
+  paper.append(heading, tagline, prompt)
+  root.append(paper)
 
   // A fresh title starts visible; the DOM is built once and only toggled after.
   let visible = true
