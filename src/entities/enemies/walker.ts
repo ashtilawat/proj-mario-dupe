@@ -90,7 +90,7 @@ interface CapSpot {
 
 /**
  * Five spots, sized and placed by hand so the cap looks cut rather than stamped. Every
- * polar angle stays inside 25-55 degrees and every azimuth inside +/-62: nearer the apex
+ * polar angle stays within 33-55 degrees and every azimuth within +/-62: nearer the apex
  * and a lifted spot clears the tile's ceiling, nearer the rim and it hangs over the edge.
  */
 const CAP_SPOTS: readonly CapSpot[] = [
@@ -102,9 +102,10 @@ const CAP_SPOTS: readonly CapSpot[] = [
 ]
 
 /**
- * How far a spot stands off the cap. A flat disc chorded across the dome sags by about
- * r^2 / 2R — some 0.006 tile at the largest spot — so anything less lets the disc's rim
- * sink into the cap and z-fight. This is that sag doubled.
+ * How far a spot stands off the cap, along the normal at its centre. The disc is laid on
+ * the tangent plane of a convex dome, so it is the CENTRE that sits closest to the surface
+ * and the rim that lifts away — this value is the whole of the clearance, not a margin on
+ * top of one. Small enough to read as painted on, large enough not to z-fight.
  */
 const SPOT_LIFT = 0.012
 const SPOT_SEGMENTS = 10
@@ -131,14 +132,20 @@ function paint(geometry: THREE.BufferGeometry, hex: number): void {
 }
 
 /**
- * The cap's profile in world units, authored bottom-to-top: the underside's centre, out to
- * the rim, then up the quarter-ellipse to the apex. The direction is not a style choice —
- * THREE derives lathe normals from the profile's direction of travel, so a top-to-bottom
- * profile renders the cap inside-out. The flat leading run out to the rim closes the
- * underside with a disc, so the bell is a solid rather than a shell you can see through.
+ * The dome's profile in world units, authored bottom-to-top: the rim, then up the
+ * quarter-ellipse to the apex. The direction is not a style choice — THREE derives lathe
+ * normals from the profile's direction of travel, so a top-to-bottom profile renders the
+ * cap inside-out.
+ *
+ * The profile deliberately STOPS at the rim rather than running on to the axis to close
+ * the underside. THREE averages a lathe's adjoining segment normals weighted by segment
+ * length (and banks the running normal before normalising it), so a flat underside run
+ * sharing this vertex ring would outvote the dome's first short step seven to one and
+ * leave the rim facing down — a black band around the cap's widest, most visible point.
+ * `capUnderside` closes it with a separate disc instead, which keeps the rim a hard edge.
  */
 function capProfile(): THREE.Vector2[] {
-  const points = [new THREE.Vector2(0, CAP_RIM_Y * TILE_SIZE)]
+  const points: THREE.Vector2[] = []
 
   for (let step = 0; step <= CAP_PROFILE_STEPS; step += 1) {
     const t = (Math.PI / 2) * (step / CAP_PROFILE_STEPS)
@@ -151,6 +158,20 @@ function capProfile(): THREE.Vector2[] {
   }
 
   return points
+}
+
+/**
+ * The disc that closes the bell, facing straight down. It carries the cap's own colour, so
+ * it stays part of the cap rather than reading as a fourth part, and it is cut with the
+ * same segment count as the dome so their rims land on identical angles and no sliver can
+ * open between them.
+ */
+function capUnderside(): THREE.BufferGeometry {
+  const disc = new THREE.CircleGeometry(CAP_RADIUS * TILE_SIZE, CAP_RADIAL_SEGMENTS)
+  // A circle faces +Z; a quarter turn about X lays it flat and points it at the floor.
+  disc.rotateX(Math.PI / 2)
+  disc.translate(0, CAP_RIM_Y * TILE_SIZE, 0)
+  return disc
 }
 
 /**
@@ -197,11 +218,13 @@ function createSpotGeometry(spot: CapSpot): THREE.BufferGeometry {
  * would demand a material array.
  */
 function createMushroomGeometry(): THREE.BufferGeometry {
-  const cap = new THREE.LatheGeometry(capProfile(), CAP_RADIAL_SEGMENTS)
-  paint(cap, WALKER_CAP_COLOR)
+  const dome = new THREE.LatheGeometry(capProfile(), CAP_RADIAL_SEGMENTS)
+  const underside = capUnderside()
+  paint(dome, WALKER_CAP_COLOR)
+  paint(underside, WALKER_CAP_COLOR)
 
   // The foot is pinned to the tile's floor; the top runs past the rim by NECK_OVERLAP, far
-  // enough inside the dome (which is still 0.45 tiles wide there) that no seam can open.
+  // enough inside the dome (still 0.456 tiles wide at that height) that no seam can open.
   const footY = -MESH_SPAN / 2
   const topY = CAP_RIM_Y + NECK_OVERLAP
   const stem = new THREE.CylinderGeometry(
@@ -213,7 +236,7 @@ function createMushroomGeometry(): THREE.BufferGeometry {
   stem.translate(0, ((topY + footY) / 2) * TILE_SIZE, 0)
   paint(stem, WALKER_STEM_COLOR)
 
-  const parts = [cap, stem, ...CAP_SPOTS.map(createSpotGeometry)]
+  const parts = [dome, underside, stem, ...CAP_SPOTS.map(createSpotGeometry)]
 
   // Typed non-null, but the implementation returns null when attribute sets disagree —
   // fail here rather than handing main.ts a null geometry to dispose().
@@ -247,7 +270,7 @@ export class Walker implements Body {
     this.mesh = new THREE.Mesh(
       createMushroomGeometry(),
       // Left white: Lambert multiplies material.color by the vertex colour, so any tint
-      // here would darken both the cap and the stem.
+      // here would darken the cap, the stem and the spots together.
       new THREE.MeshLambertMaterial({ vertexColors: true }),
     )
     this.syncMesh()

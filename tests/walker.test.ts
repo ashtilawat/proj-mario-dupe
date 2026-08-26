@@ -224,6 +224,8 @@ describe('mushroom mesh', () => {
     minY: number
     maxY: number
     halfWidth: number
+    /** Largest distance from the Y axis, so a spot hanging over the rim in +Z is caught. */
+    maxRadius: number
     vertices: number
     /** Distinct horizontal radii, which is what tells a lathed bell from a slab. */
     radii: Set<string>
@@ -254,6 +256,7 @@ describe('mushroom mesh', () => {
         part.minY = Math.min(part.minY, y)
         part.maxY = Math.max(part.maxY, y)
         part.halfWidth = Math.max(part.halfWidth, Math.abs(x))
+        part.maxRadius = Math.max(part.maxRadius, Math.hypot(x, z))
         part.vertices += 1
         part.radii.add(radius)
         part.azimuths.add(azimuth)
@@ -263,6 +266,7 @@ describe('mushroom mesh', () => {
           minY: y,
           maxY: y,
           halfWidth: Math.abs(x),
+          maxRadius: Math.hypot(x, z),
           vertices: 1,
           radii: new Set([radius]),
           azimuths: new Set([azimuth]),
@@ -366,14 +370,15 @@ describe('mushroom mesh', () => {
 
     // A lathed profile gives a different radius at every height. A box gives exactly one.
     expect(cap.radii.size).toBeGreaterThanOrEqual(5)
-    // ...and revolving it gives many angles around Y. A box gives exactly four.
-    expect(cap.azimuths.size).toBeGreaterThanOrEqual(8)
+    // ...and revolving it gives many angles around Y. A box gives four; a pentagon gives
+    // eight, which is why this sits at 12 rather than on that boundary.
+    expect(cap.azimuths.size).toBeGreaterThanOrEqual(12)
   })
 
   test('has a round stem, not a post', () => {
     const { stem } = toadstool(createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry)
 
-    expect(stem.azimuths.size).toBeGreaterThanOrEqual(8)
+    expect(stem.azimuths.size).toBeGreaterThanOrEqual(12)
   })
 
   test('is no longer two merged boxes', () => {
@@ -390,8 +395,68 @@ describe('mushroom mesh', () => {
     // Above the rim and below the apex: on the dome's shoulder, where they are visible.
     expect(spots.minY).toBeGreaterThan(cap.minY)
     expect(spots.maxY).toBeLessThan(cap.maxY)
-    // Lifted clear of the surface to avoid z-fighting, but never past the cap's own edge.
-    expect(spots.halfWidth).toBeLessThanOrEqual(cap.halfWidth)
+    // Radially, not just in x — a spot hanging over the rim in +Z would slip past a
+    // half-width comparison, because the cap is at its widest there too.
+    expect(spots.maxRadius).toBeLessThanOrEqual(cap.maxRadius)
+  })
+
+  test('stands its spots proud of the cap, not sunk into it', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const { cap, spots } = toadstool(geometry)
+    const position = geometry.getAttribute('position')
+    const color = geometry.getAttribute('color')
+
+    // The dome the spots are laid on, read back off the cap itself.
+    const radius = cap.maxRadius
+    const rim = cap.minY
+    const height = cap.maxY - cap.minY
+
+    // Every spot vertex must sit ON or OUTSIDE that ellipsoid. This is the assertion that
+    // pins the two things nothing else in this file can see: that the discs are oriented
+    // by the cap's TRUE normal rather than the radial direction — the two differ by some
+    // twenty degrees, which is enough to bury a disc's edge — and that SPOT_LIFT pushes
+    // them out rather than in. A sunk spot z-fights; a spot inside the closed dome is
+    // invisible outright, and both otherwise ship green.
+    for (let i = 0; i < position.count; i += 1) {
+      const isSpot = [color.getX(i), color.getY(i), color.getZ(i)].join(',') === spots.color.join(',')
+      if (!isSpot) continue
+
+      const x = position.getX(i) / radius
+      const y = (position.getY(i) - rim) / height
+      const z = position.getZ(i) / radius
+      expect(x * x + y * y + z * z).toBeGreaterThan(1)
+    }
+  })
+
+  test('lights its rim instead of shading it black', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const { cap } = toadstool(geometry)
+    const position = geometry.getAttribute('position')
+    const normal = geometry.getAttribute('normal')
+    const color = geometry.getAttribute('color')
+
+    // THREE averages a lathe's adjoining segment normals weighted by segment LENGTH, and
+    // it stores the running normal before normalising it. Let the cap's underside share
+    // the rim's vertex ring and that one long flat run outvotes the first short step of
+    // the dome, so the rim ends up facing DOWN — the key light misses it entirely and a
+    // black band rings the mushroom at its widest, most visible point.
+    // The underside's own rim ring is entitled to face down — that is what closes the
+    // bell. What must also exist at that radius is the DOME's ring, facing out and up.
+    let facingOut = 0
+    for (let i = 0; i < position.count; i += 1) {
+      const isCap = [color.getX(i), color.getY(i), color.getZ(i)].join(',') === cap.color.join(',')
+      const x = position.getX(i)
+      const z = position.getZ(i)
+      if (!isCap || Math.abs(Math.hypot(x, z) - cap.maxRadius) > 1e-6) continue
+
+      // Outward means away from the Y axis, so the rim catches a light above and to the side.
+      const outward = new THREE.Vector3(x, 0, z).normalize()
+      const n = new THREE.Vector3(normal.getX(i), normal.getY(i), normal.getZ(i)).normalize()
+      if (n.dot(outward) > 0.5 && n.y > 0) facingOut += 1
+    }
+
+    // A full ring of them, not one stray vertex: the cap turns 20 ways.
+    expect(facingOut).toBeGreaterThanOrEqual(12)
   })
 
   test('builds the cap right way out', () => {
@@ -431,9 +496,11 @@ describe('mushroom mesh', () => {
     // here floats or sinks every walker in the game.
     expect(box.min.y).toBeCloseTo(-half, 6)
 
-    // ...and the cap still fills most of the tile, so "stays inside" cannot decay into
-    // a pinhead that technically passes every bound above.
+    // ...and the cap still fills most of the tile in BOTH directions, so "stays inside"
+    // cannot decay into a pinhead, or into a plate: without the height floor, collapsing
+    // CAP_HEIGHT to 0.06 flattens the bell and every other assertion here still passes.
     expect(box.max.x).toBeGreaterThan(0.4 * TILE_SIZE)
+    expect(box.max.y).toBeGreaterThan(0.35 * TILE_SIZE)
   })
 
   test('sits on the gameplay plane, synced from the hitbox', () => {
