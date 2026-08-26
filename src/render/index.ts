@@ -5,6 +5,7 @@ import { DIRT_COLOR, GRASS_TOP_COLOR, applyTileArt } from './tile-art.ts'
 export * from './tile-art.ts'
 export { createBackdrop } from './backdrop.ts'
 export { createCaveBackdrop } from './cave-backdrop.ts'
+export { createCastleBackdrop } from './castle-backdrop.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
 export const FRUSTUM_HEIGHT = 10
