@@ -1,2 +1,7 @@
-// M0 stub — debug overlays and dev tooling live here.
-export {}
+export type { Aabb2, Vec2, Velocity2, DebugBody, Tuning, PrdTuning, TuningKey } from './types.ts'
+export { PRD_TUNING_DEFAULTS, TUNING_KEYS, TUNING_LABELS, cloneTuning, mergeTuning } from './types.ts'
+export { createDebugOverlay } from './overlay.ts'
+export type { DebugOverlay } from './overlay.ts'
+export { formatTuningAsSource, mountTuningPanel } from './tuning.ts'
+export type { ClipboardLike, TuningPanel, TuningPanelOptions } from './tuning.ts'
+export { parseLevelHash, applyLevelHash } from './hash.ts'
