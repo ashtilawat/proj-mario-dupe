@@ -130,6 +130,9 @@ describe('coin spin', () => {
   test('spins about Y only, so the disc never tumbles', () => {
     const coin = createCoin({ x: 0, y: 0 })
     for (let frame = 0; frame < 30; frame += 1) coin.step(1 / 60)
+    // Half a second at one revolution per second: the disc really has turned, so the
+    // untouched-axis assertions below cannot pass by way of a step() that does nothing.
+    expect(coin.mesh.rotation.y).toBeCloseTo(Math.PI, 10)
     expect(coin.mesh.rotation.x).toBe(0)
     expect(coin.mesh.rotation.z).toBe(0)
   })
