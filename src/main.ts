@@ -14,7 +14,10 @@ import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
 import { TILE_SIZE, overlaps } from './physics/index.ts'
 import type { Aabb, TileGrid, TileKind } from './physics/index.ts'
-import { GAMEPLAY_Z, SKY_COLOR, createLights, tileColorAt } from './render/index.ts'
+import { GAMEPLAY_Z, SKY_COLOR, applyTileArt, createLights, tileColorAt } from './render/index.ts'
+// Aliased: `title` is also the name of the live card below, and the story module owns the
+// copy while `createTitle` owns the DOM.
+import { title as storyTitle } from './story/index.ts'
 import { createHud, createTitle } from './ui/index.ts'
 import type { Hud, Title } from './ui/index.ts'
 import { createDebugOverlay } from './debug/index.ts'
@@ -457,7 +460,7 @@ export function startGame(
   // Last, so the curtain sits on top of the end card as well as the HUD: both of those use
   // z-index 20, and DOM order is what breaks the tie. `createTitle` starts visible, and
   // `title.visible` IS this run's "not started yet" flag — a second boolean could drift.
-  const title = createTitle()
+  const title = createTitle({ heading: storyTitle })
   title.mount(container)
 
   const input = createInput()
@@ -500,8 +503,16 @@ export function startGame(
       // its attribute cache on the InstancedMesh dispose event, not on the material's.
       tiles.dispose()
       tiles.removeFromParent()
+      // Deliberately NOT disposing `material.map`. Themes share one memoized texture, so it
+      // outlives any single batch by design — freeing it here would pull the art out from
+      // under the next level load, and out from under a later startGame.
     }
     tiles = createTileMesh(grid)
+    // Here rather than inside createTileMesh, which is handed a grid and has no theme to
+    // read. Applying it per level load is also what makes the art follow the level being
+    // swapped in instead of the one the run booted on. Only `material.map` is touched, so
+    // the grayscale ground art multiplies with the grass/dirt instance colors set above.
+    applyTileArt(tiles, level.theme)
     scene.add(tiles)
 
     for (const walker of walkers) {
