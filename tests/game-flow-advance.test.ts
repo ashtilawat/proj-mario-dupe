@@ -1,7 +1,12 @@
 /**
- * The flag's "next level IS registered" path. `src/levels/load.ts` only knows World 1-1, so
- * the swap is unreachable in the shipped build until 1-2 ships — this file registers a
- * synthetic 1-2 through the module mock instead of touching `src/levels`.
+ * The flag's "next level IS registered" path, pinned against a synthetic 1-2 supplied
+ * through the module mock rather than the real `src/levels` data. Keeping the fixture
+ * synthetic is what makes the assertions below readable: an 8x6 room with two walkers at
+ * known tiles says far more about the swap than the shipped 1-2 would.
+ *
+ * The mock also hides every id beyond 1-1 and 1-2, so the synthetic 1-2's flag still lands
+ * on the unregistered branch and wins. Without that, now that World 1 is fully authored,
+ * it would simply advance to 1-3 and this file would be testing nothing.
  *
  * It lives in its own file on purpose: `vi.mock` is per-module and would otherwise make the
  * YOU WIN assertions in `game-flow.test.ts` unreachable.
@@ -34,8 +39,13 @@ vi.mock('../src/levels/index.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/levels/index.ts')>()
   return {
     ...actual,
-    loadLevel: (id: string): Level =>
-      id === '1-2' ? (WORLD_1_2 as unknown as Level) : actual.loadLevel(id),
+    loadLevel: (id: string): Level => {
+      if (id === '1-2') return WORLD_1_2 as unknown as Level
+      // Everything past the synthetic 1-2 is deliberately unknown here, so its flag reaches
+      // the "no next level" branch exactly as it did before the rest of World 1 shipped.
+      if (id !== '1-1') throw new Error('Unknown level: ' + id)
+      return actual.loadLevel(id)
+    },
   }
 })
 

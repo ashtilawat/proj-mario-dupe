@@ -67,6 +67,23 @@ function pressEnter(container: HTMLElement): void {
   )
 }
 
+/**
+ * Take every flag from the start of the run to the last level NEXT_LEVEL knows about. World
+ * 1 is fully registered now, so each flag before the castle's advances the run instead of
+ * ending it — only the final flag in the chain can win.
+ */
+function winTheRun(game: Game): void {
+  let id: string | undefined = START_LEVEL
+  while (id !== undefined) {
+    const flag = loadLevel(id).entities.find((e) => e.type === 'flag')
+    if (!flag) throw new Error('no flag in level ' + id)
+    game.player.body.aabb.x = flag.at[0]
+    game.player.body.aabb.y = flag.at[1]
+    game.loop.tick(1 / 120)
+    id = NEXT_LEVEL[id]
+  }
+}
+
 describe('the end-card overlay', () => {
   test('is mounted but hidden while the game is being played', () => {
     const { container } = start()
@@ -263,13 +280,10 @@ describe('the flag', () => {
     expect(NEXT_LEVEL['1-castle']).toBeUndefined()
   })
 
-  test('wins the game when the next level is not registered yet', () => {
+  test('wins the game on the last flag in the chain', () => {
     const { container, game } = start()
-    const [flagX, flagY] = loadLevel(START_LEVEL).entities.find((e) => e.type === 'flag')!.at
-    game.player.body.aabb.x = flagX
-    game.player.body.aabb.y = flagY
 
-    game.loop.tick(1 / 120)
+    winTheRun(game)
 
     expect(endCard(container).dataset.mode).toBe('win')
     expect(cardText(container)).toBe(WIN_TEXT)
@@ -277,9 +291,7 @@ describe('the flag', () => {
 
   test('freezes the simulation behind the win card', () => {
     const { game } = start()
-    game.player.body.aabb.x = 22
-    game.player.body.aabb.y = 1
-    game.loop.tick(1 / 120)
+    winTheRun(game)
 
     const walker = game.walkers[0]!
     const walkerX = walker.aabb.x
@@ -294,9 +306,7 @@ describe('the flag', () => {
     fallInPit(game)
     expect(game.hud.getState().lives).toBe(START_LIVES - 1)
 
-    game.player.body.aabb.x = 22
-    game.player.body.aabb.y = 1
-    game.loop.tick(1 / 120)
+    winTheRun(game)
     expect(endCard(container).dataset.mode).toBe('win')
 
     pressEnter(container)
