@@ -22,6 +22,7 @@ import {
   UNDERGROUND_SKY_COLOR,
   applyTileArt,
   createBackdrop,
+  createCaveBackdrop,
   createLights,
   tileColorAt,
 } from './render/index.ts'
@@ -589,6 +590,16 @@ export function startGame(
   // the two frames — without it the near hill row tops out below the frustum floor and never
   // draws at all. A constant, not a per-frame update: the camera's Y is fixed.
   backdrop.position.y = CAMERA_Y
+  // The underground counterpart, built once for the same reason and swapped in the same way: a
+  // flag flip in `applyLevel`, never a rebuild. `createCaveBackdrop` parks itself at -20 like
+  // the hills, so depth needs nothing here.
+  const caveBackdrop = createCaveBackdrop()
+  // The same reconciliation `backdrop` needs, for the same reason: T-054 authored the cave
+  // against a camera centred on y = 0 — rock closing in from y = ±5 — while `followPlayer`
+  // parks the live one at CAMERA_Y and never moves it off. Without the lift the floor row tops
+  // out below the frustum floor and an underground level looks exactly as it did before this
+  // was wired at all.
+  caveBackdrop.position.y = CAMERA_Y
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
   // Filled by `applyLevel`, never reassigned: these arrays are the ones handed out on Game.
@@ -605,6 +616,7 @@ export function startGame(
     // `createBackdrop` parks itself at BG_Z, far behind the tile batch at GAMEPLAY_Z, so
     // depth is what keeps it in the back — its place in this list carries no meaning.
     backdrop,
+    caveBackdrop,
     directional,
     hemisphere,
     player.mesh,
@@ -748,6 +760,10 @@ export function startGame(
     // flip. Grass-only because that is what the art is — hills and clouds have no business
     // standing behind a castle, and none at all underground.
     backdrop.visible = level.theme === 'grass'
+    // The same flip on the other theme. Two independent flags rather than one either/or, which
+    // is what makes the castle — neither grass nor underground — come out with both layers down
+    // and no special case anywhere.
+    caveBackdrop.visible = level.theme === 'underground'
 
     for (const walker of walkers) {
       walker.mesh.geometry.dispose()
@@ -1129,6 +1145,10 @@ export function startGame(
       // zero parallax — a distant sky barely shifts anyway, and the parallax pass that
       // src/render/backdrop.ts anticipates is what turns this constant into a factor.
       backdrop.position.x = camera.position.x
+      // Same pin, same zero parallax. The rock spans roughly x in [-14.5, 15.5] around the
+      // group against a half-frustum of ~10, so a pinned layer never runs out sideways. Written
+      // unconditionally: two floats is cheaper than asking whether the layer is even up.
+      caveBackdrop.position.x = camera.position.x
       debugVelocity.vx = player.body.velocity.x
       debugVelocity.vy = player.body.velocity.y
       overlay.setBodies(debugBodies)
@@ -1182,23 +1202,11 @@ export function startGame(
         boss.mesh.material.dispose()
       }
       for (const flag of flagArt) flag.dispose()
-      // The group shares one geometry across every hill and one material across every cloud,
-      // so the sets are what keep this from disposing the shared ones over and over. The
-      // counts themselves deliberately stay in src/render/backdrop.ts.
-      const geometries = new Set<THREE.BufferGeometry>()
-      const materials = new Set<THREE.Material>()
-      backdrop.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return
-        geometries.add(object.geometry)
-        for (const material of Array.isArray(object.material)
-          ? object.material
-          : [object.material]) {
-          materials.add(material)
-        }
-      })
-      for (const geometry of geometries) geometry.dispose()
-      for (const material of materials) material.dispose()
+      // Both background groups, through the same de-duplicating walk: see `disposeGroupArt`.
+      disposeGroupArt(backdrop)
+      disposeGroupArt(caveBackdrop)
       backdrop.removeFromParent()
+      caveBackdrop.removeFromParent()
       walkerLayer.removeFromParent()
       coinLayer.removeFromParent()
       bossLayer.removeFromParent()
@@ -1216,6 +1224,28 @@ function followPlayer(camera: THREE.OrthographicCamera, player: Player, grid: Ti
   const maxX = grid.width - halfWidth
   camera.position.x = maxX <= minX ? grid.width / 2 : Math.min(Math.max(centerX, minX), maxX)
   camera.position.y = CAMERA_Y
+}
+
+/**
+ * Every geometry and material hanging under `group`, disposed exactly once each.
+ *
+ * The sets are the whole point: a backdrop group shares one geometry across every hill and one
+ * material across every cloud, and the cave shares one sphere across all six rock masses and one
+ * cone across all five formations. A per-mesh loop would dispose the shared ones over and over.
+ * The counts themselves deliberately stay in src/render.
+ */
+function disposeGroupArt(group: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>()
+  const materials = new Set<THREE.Material>()
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return
+    geometries.add(object.geometry)
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      materials.add(material)
+    }
+  })
+  for (const geometry of geometries) geometry.dispose()
+  for (const material of materials) material.dispose()
 }
 
 /** Browser entry point. Starts World 1-1 and keeps it sized to the window. */
