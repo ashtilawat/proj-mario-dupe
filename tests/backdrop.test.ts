@@ -136,3 +136,77 @@ describe('backdrop hills', () => {
     }
   })
 })
+
+describe('backdrop clouds', () => {
+  test('are flattened cream ellipsoids in open sky, in front of the hills', () => {
+    const backdrop = createBackdrop()
+    const clouds = childrenOfKind(backdrop, 'cloud')
+    const hills = childrenOfKind(backdrop, 'hill')
+
+    expect(clouds.length).toBeGreaterThanOrEqual(2)
+
+    const frontmostHillZ = Math.max(...hills.map((hill) => hill.position.z))
+
+    for (const cloud of clouds) {
+      const params = sphereParams(cloud)
+      // A full sphere, unlike the hill domes — a cloud has no horizon to sit on.
+      expect(params.thetaLength).toBeCloseTo(Math.PI, 5)
+      expect(params.widthSegments).toBeLessThanOrEqual(16)
+
+      // Flattened, or it reads as a ball rather than a cloud.
+      expect(cloud.scale.x).toBeGreaterThan(cloud.scale.y * 1.5)
+      // Up in open sky, clear of the far ridge line.
+      expect(cloud.position.y).toBeGreaterThan(0)
+      // In front of every hill, so an overlap depth-sorts instead of z-fighting.
+      expect(cloud.position.z).toBeGreaterThan(frontmostHillZ)
+
+      const { r, g, b } = channels(colorOf(cloud))
+      expect(Math.min(r, g, b)).toBeGreaterThan(200)
+    }
+  })
+
+  test('stay in Lambert and behind gameplay, like the rest of the layer', () => {
+    const backdrop = createBackdrop()
+    backdrop.updateMatrixWorld(true)
+
+    for (const cloud of childrenOfKind(backdrop, 'cloud')) {
+      for (const material of materialsOf(cloud)) {
+        expect(material).toBeInstanceOf(THREE.MeshLambertMaterial)
+        expect(isPbrMaterial(material)).toBe(false)
+      }
+
+      const worldZ = worldZOf(cloud)
+      expect(worldZ).toBeLessThan(GAMEPLAY_Z)
+      expect(worldZ).toBeGreaterThanOrEqual(-40)
+      expect(worldZ).toBeLessThanOrEqual(-10)
+    }
+  })
+})
+
+describe('backdrop cost', () => {
+  test('is a handful of meshes over shared geometries and materials', () => {
+    const backdrop = createBackdrop()
+    const meshes = backdrop.children.filter(isMesh)
+
+    // Nothing but meshes hangs off the group: no stray lights, no nested groups.
+    expect(meshes).toHaveLength(backdrop.children.length)
+    expect(meshes.length).toBeLessThanOrEqual(12)
+
+    const geometries = new Set(meshes.map((mesh) => mesh.geometry))
+    const materials = new Set(meshes.flatMap(materialsOf))
+
+    expect(geometries.size).toBeLessThanOrEqual(2)
+    expect(materials.size).toBeLessThanOrEqual(3)
+  })
+
+  test('carries no physics: this layer is visual only', () => {
+    const backdrop = createBackdrop()
+
+    expect('update' in backdrop).toBe(false)
+    expect(backdrop.userData['aabb']).toBeUndefined()
+
+    for (const child of backdrop.children) {
+      expect(child.userData['aabb']).toBeUndefined()
+    }
+  })
+})

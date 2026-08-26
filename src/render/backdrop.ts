@@ -78,6 +78,31 @@ function createHillGeometry(): THREE.SphereGeometry {
   return new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2)
 }
 
+/** Warm cream rather than pure white, so clouds read as lit instead of as holes in the sky. */
+const CLOUD_COLOR = 0xf4f1e4
+
+/** Clouds ride in front of both hill rows. */
+const CLOUD_LOCAL_Z = 0.5
+
+interface CloudSpec {
+  x: number
+  y: number
+  halfWidth: number
+  halfHeight: number
+}
+
+/** Three puffs, unevenly spaced and unevenly sized — a regular rhythm would read as a
+ *  pattern. One sphere each, not a cluster: the cheapest thing that still reads. */
+const CLOUDS: readonly CloudSpec[] = [
+  { x: -6.5, y: 3.2, halfWidth: 2.4, halfHeight: 0.85 },
+  { x: 1.5, y: 4, halfWidth: 1.8, halfHeight: 0.7 },
+  { x: 7.5, y: 2.6, halfWidth: 2.8, halfHeight: 0.95 },
+]
+
+function createCloudGeometry(): THREE.SphereGeometry {
+  return new THREE.SphereGeometry(1, 12, 8)
+}
+
 /** Hills and clouds for the background plane. A fresh group every call — two scenes must
  *  never share one object. */
 export function createBackdrop(): THREE.Group {
@@ -95,6 +120,18 @@ export function createBackdrop(): THREE.Group {
     mesh.userData['kind'] = 'hill'
     mesh.position.set(hill.x, HILL_BASE_Y, hill.far ? FAR_HILL_Z : NEAR_HILL_Z)
     mesh.scale.set(hill.halfWidth, hill.height, SILHOUETTE_DEPTH)
+    group.add(mesh)
+  }
+
+  const cloudGeometry = createCloudGeometry()
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: CLOUD_COLOR })
+
+  for (const cloud of CLOUDS) {
+    const mesh = new THREE.Mesh(cloudGeometry, cloudMaterial)
+    mesh.name = 'cloud'
+    mesh.userData['kind'] = 'cloud'
+    mesh.position.set(cloud.x, cloud.y, CLOUD_LOCAL_Z)
+    mesh.scale.set(cloud.halfWidth, cloud.halfHeight, SILHOUETTE_DEPTH)
     group.add(mesh)
   }
 
