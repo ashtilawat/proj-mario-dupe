@@ -480,8 +480,14 @@ export function startGame(
   const HIT_IFRAMES_S = 1
   let invuln = 0
 
-  /** Last tick's jump button, so the jump sting can find the press edge. See `simulate`. */
+  /**
+   * Last tick's jump button, so the jump sting can find the press edge. See `simulate` — and
+   * `onSpaceDown`, which primes it so a keyboard press is not chirped twice.
+   */
   let prevJump = false
+
+  /** Space held right now, so a keydown auto-repeat cannot chirp twice for one press. */
+  let spaceHeld = false
 
   let mode: RunMode = 'playing'
 
@@ -607,20 +613,57 @@ export function startGame(
     mode = 'playing'
   }
 
+  /**
+   * The jump chirp for a keyboard press, fired from the gesture itself rather than from the
+   * loop. Browsers hand back a SUSPENDED AudioContext to anything that opens one outside a user
+   * gesture, and `playSfx` opens it on its first call — so a chirp that only ever came from a
+   * requestAnimationFrame callback made no sound at all on a real page.
+   *
+   * Priming `prevJump` is what stops `simulate` chirping this same press a second time. A
+   * gamepad jump has no keydown, so it still finds its edge there.
+   */
+  function onSpaceDown(): void {
+    // Held keys repeat their keydown; one press is one chirp.
+    if (spaceHeld) return
+    spaceHeld = true
+    // Same freeze rule the loop follows: no chirp for a Space pressed into a card.
+    if (title.visible || mode !== 'playing') return
+    playSfx('jump')
+    prevJump = true
+  }
+
   // The engine's InputState has no Enter — it is a menu key, not a movement one — so the
   // cards listen for themselves. Two of them share the key now, and the order below is the
   // whole rule: the title always wins it, so an end card can only ever answer to Enter once
   // the title is down. Between the two, Enter is inert while a run is being played.
+  //
+  // Space is handled here as well, for the audio-context reason in `onSpaceDown` — the engine
+  // still owns it as a movement key, and this listener never touches the input state.
   function onKeydown(event: KeyboardEvent): void {
+    if (event.code === 'Space') {
+      onSpaceDown()
+      return
+    }
     if (event.key !== 'Enter') return
     if (title.visible) {
+      // Before `hide`, and the reason it is here rather than anywhere prettier: this is the
+      // first user gesture of every run, so it is the one moment the game can open a RUNNING
+      // audio context. Every later sound — jump, death, gameover — plays through the context
+      // this call opens. The fanfare doubles as the run's start sting.
+      playSfx('flag')
       title.hide()
       return
     }
     if (mode === 'playing') return
     restart()
   }
+
+  function onKeyup(event: KeyboardEvent): void {
+    if (event.code === 'Space') spaceHeld = false
+  }
+
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('keyup', onKeyup)
 
   applyLevel(START_LEVEL)
 
@@ -642,6 +685,9 @@ export function startGame(
       // player.ts owns the launch and is not ours to touch. `simulate` is handed the SAME
       // InputState object for every fixed step in a frame, so this fires at most once per
       // tick — but it does fire on a mid-air press that no jump comes of.
+      //
+      // A keyboard press has already chirped from its own keydown and left `prevJump` true, so
+      // what actually reaches this line is a gamepad button: the pad has no keydown to ride.
       if (state.jump && !prevJump) playSfx('jump')
       prevJump = state.jump
 
@@ -761,6 +807,7 @@ export function startGame(
       input.detach()
       dash.detach()
       window.removeEventListener('keydown', onKeydown)
+      window.removeEventListener('keyup', onKeyup)
       overlay.dispose()
       endOverlay.dispose()
       title.unmount()

@@ -55,6 +55,9 @@ function boot(size = { width: 800, height: 400 }) {
 function start(size = { width: 800, height: 400 }) {
   const booted = boot(size)
   pressEnter(booted.container)
+  // T-036: the run-start sting that Enter plays has its own test below; clearing it here keeps
+  // every other test's log to the gameplay sounds it is actually about.
+  sfx.mockClear()
   return booted
 }
 
@@ -294,6 +297,17 @@ describe('sound effects', () => {
     expect(game.hud.getState().lives).toBe(0)
     expect(countOf('death')).toBe(START_LIVES - 1)
     expect(countOf('gameover')).toBe(1)
+  })
+
+  test('plays a start sting on the Enter that dismisses the title', () => {
+    const { container } = boot()
+
+    pressEnter(container)
+
+    // The sound itself is the flag fanfare, reused. What matters is that it comes from the
+    // keydown: `playSfx` opens the AudioContext on its first call, and a browser only hands
+    // back a running one to a user gesture. tests/sfx-oscillator.test.ts checks that end.
+    expect(played()).toEqual(['flag'])
   })
 
   test('plays flag when a flag advances the run', () => {

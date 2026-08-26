@@ -40,6 +40,10 @@ function start(size = { width: 800, height: 400 }) {
   container.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }),
   )
+  // T-036: that Enter now plays the run-start sting that opens the audio context, and every
+  // test below is about GAMEPLAY sounds. Cleared here so the sting is not in their logs — it
+  // has its own coverage in tests/wire-sfx.test.ts and tests/sfx-oscillator.test.ts.
+  playSfx.mockClear()
   started = game
   return { container, game }
 }
