@@ -7,7 +7,7 @@ import { createWalker } from './entities/enemies/walker.ts'
 import type { Walker } from './entities/enemies/walker.ts'
 import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
-import { TILE_SIZE } from './physics/index.ts'
+import { TILE_SIZE, overlaps } from './physics/index.ts'
 import type { TileGrid, TileKind } from './physics/index.ts'
 import { GAMEPLAY_Z, createLights } from './render/index.ts'
 import { createHud } from './ui/index.ts'
@@ -256,31 +256,52 @@ export function startGame(
   const debugVelocity = { vx: 0, vy: 0 }
   const debugBodies: DebugBody[] = [{ aabb: player.body.aabb, velocity: debugVelocity }]
 
+  /**
+   * Mercy window after a side hit, in seconds, and how much of it is left. Deliberately a
+   * run-local value rather than a physics constant: it is a rule of this game mode, not a
+   * property of the simulation.
+   */
+  const HIT_IFRAMES_S = 1
+  let invuln = 0
+
   const loop = createLoop({
     input,
     simulate(dt, state) {
-      // tryStomp compares the stomper's feet against where they were before this step,
-      // and nothing on the player records that — so capture it here, before stepping.
+      // tryStomp judges the stomper by where their feet were and which way they were moving
+      // BEFORE this step, and nothing on the player records either — so capture both here.
+      // Reading the velocity afterwards is wrong: a landing zeroes vy inside moveAndCollide,
+      // so the very stomp that touched down looked like vy >= 0 and the player stood on the
+      // walker like a platform.
+      //
+      // Captured once, outside the walker loop, for a second reason: every walker under the
+      // player this tick was stomped by the same fall, and the first bounce would otherwise
+      // overwrite velocity.y with a positive value, masking every later walker's stomp behind
+      // its own stomperVy >= 0 guard — making the outcome depend on walker array order.
       const prevBottom = player.body.aabb.y
+      const prevVy = player.body.velocity.y
       player.step(dt, dash.poll(state))
 
       for (const walker of walkers) walker.step(dt, grid)
 
       // A stomp is the walker's call: it checks the fall direction and the overlap, then
-      // hands back the bounce to spend. Defeated walkers just stop being drawn.
-      //
-      // The fall velocity is read once, before the loop, rather than off player.body
-      // inside it: every walker under the player this tick was stomped by the same
-      // fall, and the first bounce would otherwise overwrite velocity.y with a
-      // positive value, masking every later walker's stomp behind its own
-      // stomperVy >= 0 guard — making the outcome depend on walker array order.
-      const fallVy = player.body.velocity.y
+      // hands back the bounce to spend. Defeated walkers just stop being drawn. An overlap
+      // that is NOT a stomp is a side hit and costs a life, but only once per i-frame
+      // window. The window is armed on the spot, so a second walker overlapping in this
+      // same tick cannot bill a second life for one jump.
       for (const walker of walkers) {
-        const bounce = walker.tryStomp(player.body.aabb, fallVy, prevBottom)
-        if (bounce === 0) continue
-        player.body.velocity.y = bounce
-        walker.mesh.visible = false
+        const bounce = walker.tryStomp(player.body.aabb, prevVy, prevBottom)
+        if (bounce !== 0) {
+          player.body.velocity.y = bounce
+          walker.mesh.visible = false
+          continue
+        }
+        if (!walker.alive || invuln > 0) continue
+        if (!overlaps(player.body.aabb, walker.aabb)) continue
+        hud.setLives(hud.getState().lives - 1)
+        invuln = HIT_IFRAMES_S
       }
+
+      invuln = Math.max(0, invuln - dt)
 
       // Fell out of the level: nothing below y=0 can ever catch the body, so the fall
       // costs a life and puts the player back on the level spawn at rest.

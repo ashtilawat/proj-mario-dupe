@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { START_LEVEL, startGame, type Game } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
 import { STOMP_BOUNCE, TILE_SIZE } from '../src/physics/index.ts'
+import { createWalker } from '../src/entities/enemies/walker.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -192,6 +193,103 @@ describe('stomping a walker', () => {
 
     expect(walker.alive).toBe(true)
     expect(game.player.body.velocity.y).not.toBe(STOMP_BOUNCE)
+  })
+
+  test('stomps on the fall the player had before the step, not the landing that zeroed it', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    dropPlayerOnWalker(game, -6)
+
+    // A real landing zeroes vy inside moveAndCollide, and no single 1/120 step on the 1-1
+    // floor both overlaps the walker and lands. So reproduce just the zeroing: run the real
+    // step, then clear vy the way a floor hit would. simulate captures the pre-step values
+    // before it calls this, so only the post-step read is poisoned by the wrapper.
+    const innerStep = game.player.step.bind(game.player)
+    game.player.step = (dt, input) => {
+      innerStep(dt, input)
+      game.player.body.velocity.y = 0
+    }
+
+    game.loop.tick(1 / 120)
+
+    expect(walker.alive).toBe(false)
+    expect(walker.mesh.visible).toBe(false)
+    expect(game.player.body.velocity.y).toBe(STOMP_BOUNCE)
+  })
+
+  test('costs one life for a side hit, and only one while the i-frames run', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    game.player.body.aabb.x = 16.2
+    game.player.body.aabb.y = 1
+    game.player.body.velocity.x = 0
+    game.player.body.velocity.y = 0
+    // Standing on the floor the walker patrols, so the contact is a side hit twice over:
+    // the player is not falling (vy is 0) and their feet started below the walker's top.
+    expect(game.hud.getState().lives).toBe(3)
+
+    game.loop.tick(1 / 120)
+
+    expect(game.hud.getState().lives).toBe(2)
+    expect(walker.alive).toBe(true)
+
+    // Still overlapping on the next step — the i-frames have to swallow it, or one jump
+    // through a walker would cost two of the player's three lives.
+    game.loop.tick(1 / 120)
+
+    expect(game.hud.getState().lives).toBe(2)
+  })
+
+  test('does not also charge a life for the walker it just stomped', () => {
+    const { game } = start()
+    dropPlayerOnWalker(game, -6)
+
+    game.loop.tick(1 / 120)
+
+    expect(game.player.body.velocity.y).toBe(STOMP_BOUNCE)
+    expect(game.hud.getState().lives).toBe(3)
+  })
+
+  /**
+   * A second walker shoulder to shoulder with the 1-1 one, both under the player. `walkers`
+   * is the very array `simulate` iterates, so pushing onto it is enough — the extra mesh
+   * never needs to reach the scene for the simulation to see the enemy.
+   */
+  function addSecondWalker(game: Game) {
+    const walker = createWalker({ x: 16.5, y: 1, dir: 1, id: 1 })
+    game.walkers.push(walker)
+    return walker
+  }
+
+  test('stomps every walker under one fall, whatever the first bounce did to velocity', () => {
+    const { game } = start()
+    const first = game.walkers[0]!
+    const second = addSecondWalker(game)
+    dropPlayerOnWalker(game, -6)
+
+    game.loop.tick(1 / 120)
+
+    // Both were caught by the same fall, so both die. Reading velocity.y inside the loop
+    // instead of once before the step would let the first bounce turn it positive and hide
+    // the second walker behind tryStomp's own stomperVy >= 0 guard.
+    expect(first.alive).toBe(false)
+    expect(second.alive).toBe(false)
+  })
+
+  test('costs only one life when two walkers overlap the player in the same tick', () => {
+    const { game } = start()
+    const second = addSecondWalker(game)
+    game.player.body.aabb.x = 16.2
+    game.player.body.aabb.y = 1
+    game.player.body.velocity.x = 0
+    game.player.body.velocity.y = 0
+
+    game.loop.tick(1 / 120)
+
+    // Arming the i-frames only after the loop would bill both walkers and strip two of the
+    // player's three lives for a single jump.
+    expect(second.alive).toBe(true)
+    expect(game.hud.getState().lives).toBe(2)
   })
 
   test('leaves an untouched walker alone while the player idles', () => {
