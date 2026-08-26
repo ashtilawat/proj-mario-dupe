@@ -75,3 +75,64 @@ describe('createBackdrop', () => {
     expect(first.children).toHaveLength(second.children.length)
   })
 })
+
+describe('backdrop hills', () => {
+  test('are dome silhouettes in muted green', () => {
+    const hills = childrenOfKind(createBackdrop(), 'hill')
+
+    expect(hills.length).toBeGreaterThanOrEqual(2)
+
+    for (const hill of hills) {
+      const params = sphereParams(hill)
+
+      // thetaLength stops the sweep at the equator: a dome with a flat bottom edge, not a
+      // ball. That is what lets position.y be the base line and scale.y the height.
+      expect(params.thetaLength).toBeCloseTo(Math.PI / 2, 5)
+      // Cheap. A background silhouette does not need a smooth limb.
+      expect(params.widthSegments).toBeLessThanOrEqual(16)
+
+      const { r, g, b } = channels(colorOf(hill))
+      expect(g).toBeGreaterThan(r)
+      expect(g).toBeGreaterThan(b)
+    }
+  })
+
+  test('overfill the frustum, so no sky shows past or under the ridge', () => {
+    const hills = childrenOfKind(createBackdrop(), 'hill')
+
+    // Orthographic: no perspective shrink at BG_Z, so frustum units are world units.
+    const halfWidth = (FRUSTUM_HEIGHT / 2) * (16 / 9)
+    const floor = -FRUSTUM_HEIGHT / 2
+
+    const left = Math.min(...hills.map((hill) => hill.position.x - hill.scale.x))
+    const right = Math.max(...hills.map((hill) => hill.position.x + hill.scale.x))
+    const highestBase = Math.max(...hills.map((hill) => hill.position.y))
+
+    expect(left).toBeLessThan(-halfWidth)
+    expect(right).toBeGreaterThan(halfWidth)
+    // Bases sit below the frustum floor, so the domes never reveal their flat bottom edge.
+    expect(highestBase).toBeLessThanOrEqual(floor)
+  })
+
+  test('form two rows at distinct depths, all behind gameplay', () => {
+    const backdrop = createBackdrop()
+    backdrop.updateMatrixWorld(true)
+    const hills = childrenOfKind(backdrop, 'hill')
+
+    // Two rows, so overlapping opaque domes depth-sort instead of z-fighting.
+    const depths = new Set(hills.map((hill) => hill.position.z))
+    expect(depths.size).toBeGreaterThanOrEqual(2)
+
+    for (const hill of hills) {
+      for (const material of materialsOf(hill)) {
+        expect(material).toBeInstanceOf(THREE.MeshLambertMaterial)
+        expect(isPbrMaterial(material)).toBe(false)
+      }
+
+      const worldZ = worldZOf(hill)
+      expect(worldZ).toBeLessThan(GAMEPLAY_Z)
+      expect(worldZ).toBeGreaterThanOrEqual(-40)
+      expect(worldZ).toBeLessThanOrEqual(-10)
+    }
+  })
+})
