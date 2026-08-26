@@ -35,6 +35,7 @@ const PLAYER_COLOR = 0xe8c547
 // they tint, in tile-art.ts, and are re-exported above — this stays their one import site.
 
 /** Clear color for the grass theme. Blue-dominant, so the void reads as sky. */
+// The underground counterpart is UNDERGROUND_SKY_COLOR in tile-art.ts; not wired to a level yet.
 export const SKY_COLOR = 0x5c94fc
 
 /**

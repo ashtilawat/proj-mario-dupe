@@ -8,18 +8,15 @@ import * as THREE from 'three'
  * neither run nor be pixel-asserted under vitest. Pixels are built by pure functions here, so
  * the art is deterministic, identical in the browser and in tests, and needs no asset pipeline.
  *
- * The ground map is deliberately grayscale. Three multiplies `material.color * instanceColor *
- * map`, so a grayscale map adds surface detail on top of the existing per-instance palette
+ * The ground and underground maps are deliberately grayscale. Three multiplies `material.color *
+ * instanceColor * map`, so a grayscale map adds surface detail on top of a per-instance palette
  * instead of replacing it — grass stays green, dirt stays brown, neither stays flat. The brick
  * map is the opposite: it carries its own color, because a castle consumer may have no
  * per-instance tint to give it.
  *
- * NOT YET WIRED TO ANYTHING ON SCREEN. `createTileMesh` in main.ts builds its own material
- * inline and never asks for a map, so gameplay tiles still render as flat hex fills. Closing
- * that is a one-line `applyTileArt(tiles, level.theme)` in main.ts, which is outside this
- * module's scope. The only in-repo consumer is `createTileLayer`, which is reached solely from
- * `createRenderScene` — the M0 blockout scene, which main.ts does not call. So until that
- * one-liner lands, this art is exercised by tests and by nothing else.
+ * Darkness lives in the tint, not in the map: a map that is itself dark, multiplied by a dark
+ * tint, crushes toward black under the Lambert plus hemisphere rig. So the underground map
+ * shares the ground map's mid band, and `instanceTint` does the darkening.
  */
 
 /** A solid tile with nothing stacked on it: the lit grass surface. */
@@ -34,11 +31,36 @@ export const TILE_ART_SIZE = 16
 /** Floor for the ground map, so a textured tile never crushes toward black. ~0.70 of full. */
 export const GROUND_LUMA_FLOOR = 179
 
+/** Floor for the underground map. Lower than the ground floor — the groove cuts deeper. */
+export const UNDERGROUND_LUMA_FLOOR = 140
+
 /** `Level.theme` value for World 1-1's grass/dirt ground. */
 export const GRASS_THEME = 'grass'
 
 /** `Level.theme` value a brick-walled castle level would carry. */
 export const CASTLE_THEME = 'castle'
+
+/** `Level.theme` value for World 1-3's underground caves. */
+export const UNDERGROUND_THEME = 'underground'
+
+/**
+ * Cool slate rock for the underground caves — blue-dominant, the inverse of the warm brick, and
+ * darker than either entry of the grass palette. Both the flat tint and the per-instance repaint.
+ */
+export const UNDERGROUND_ROCK_COLOR = 0x46506b
+
+/**
+ * Clear color for the underground theme: a near-black cave void, the counterpart to the render
+ * module's grass `SKY_COLOR`. Exported for a future backdrop wire; nothing reads it yet.
+ */
+export const UNDERGROUND_SKY_COLOR = 0x0a0e1a
+
+/**
+ * What castle repaints per-instance colors to. White is the identity of the multiply, so the
+ * brick map's own albedo comes through unstained — without this, a mesh still carrying the
+ * grass palette from a previous theme would tint the whole wall green.
+ */
+export const CASTLE_INSTANCE_TINT = 0xffffff
 
 /**
  * Flat fallback tint for castle tiles, for consumers that want a single hex rather than the
@@ -124,6 +146,42 @@ export function createGroundDetailTexture(): THREE.DataTexture {
   })
 }
 
+const UNDERGROUND_BASE_LUMA = 210
+
+/** Depth of the 1-texel seam cut around the tile, which is what reads as a hewn stone block. */
+const UNDERGROUND_GROOVE = -55
+
+/** Coarser than the ground speckle, and applied per 2x2 block: rough rock rather than turf. */
+const UNDERGROUND_SPECKLE = [-14, -7, 0, 7]
+
+function undergroundLuma(x: number, y: number): number {
+  const onEdge = x === 0 || y === 0 || x === TILE_ART_SIZE - 1 || y === TILE_ART_SIZE - 1
+  const groove = onEdge ? UNDERGROUND_GROOVE : 0
+  // Hashing the halved coordinate is what makes the grain chunky: one draw per 2x2 texels. The
+  // row is folded about the tile's middle first, so row y and row SIZE-1-y come out identical
+  // and the map is EXACTLY symmetric top to bottom — "nothing lights this from above" as a
+  // property of the generator, not as a statistical near-miss the speckle could break.
+  const foldedRow = Math.min(y, TILE_ART_SIZE - 1 - y)
+  const speckle = UNDERGROUND_SPECKLE[hash2(x >> 1, foldedRow >> 1) % UNDERGROUND_SPECKLE.length]!
+  return clamp(UNDERGROUND_BASE_LUMA + groove + speckle, UNDERGROUND_LUMA_FLOOR, 255)
+}
+
+/**
+ * Grayscale surface detail for underground rock. Deliberately unlike the ground map: no lit
+ * crown, because nothing underground is sun-lit from above, so the tile is vertically
+ * symmetric. A dark groove around all four edges separates one block from the next, and the
+ * coarse speckle reads as rock. The dark comes from `UNDERGROUND_ROCK_COLOR` multiplying
+ * through, not from the map.
+ *
+ * A fresh texture each call; use `tileArtForTheme` for the shared, memoized one.
+ */
+export function createUndergroundDetailTexture(): THREE.DataTexture {
+  return createArtTexture((x, y) => {
+    const luma = undergroundLuma(x, y)
+    return [luma, luma, luma]
+  })
+}
+
 const BRICK_COURSE_HEIGHT = 8
 const BRICK_LENGTH = 8
 const MORTAR_RGB: Rgb = [78, 70, 64]
@@ -175,48 +233,83 @@ export interface TileArt {
   texture: THREE.DataTexture
   /** Flat tint for consumers that cannot carry the map — a distant parallax layer, say. */
   color: number
+  /**
+   * Per-instance color this theme repaints onto a palette-tinted InstancedMesh, or undefined to
+   * keep whatever palette the caller already set. Grass leaves it undefined so World 1-1 keeps
+   * its green/brown palette; every other theme owns the tint, because the palette it would
+   * otherwise inherit is grass.
+   */
+  instanceTint?: number
 }
 
 // Themes share one texture instance so a level costs one GPU upload per theme, not one per
 // mesh. Built lazily: importing this module should not allocate a megabyte of pixels.
 const cache = new Map<string, TileArt>()
 
+const KNOWN_THEMES = new Set<string>([GRASS_THEME, CASTLE_THEME, UNDERGROUND_THEME])
+
 /**
- * Tile art for a `Level.theme` string. Grass is the default and castle is the exception, so an
- * unknown or missing theme falls through to the ground art rather than rendering untextured.
+ * Tile art for a `Level.theme` string. Grass is the default, so an unknown or missing theme
+ * falls through to the ground art rather than rendering untextured.
  */
 export function tileArtForTheme(theme: string): TileArt {
   // Resolve to a known theme BEFORE consulting the cache. Keying on the raw string would give
   // every unrecognised theme its own copy of the ground art — a fresh texture per distinct
   // string, none of them shared with grass.
-  const key = theme === CASTLE_THEME ? CASTLE_THEME : GRASS_THEME
+  const key = KNOWN_THEMES.has(theme) ? theme : GRASS_THEME
 
   const cached = cache.get(key)
   if (cached) return cached
 
-  const art: TileArt =
-    key === CASTLE_THEME
-      ? { texture: createBrickTexture(), color: CASTLE_BRICK_COLOR }
-      : { texture: createGroundDetailTexture(), color: GRASS_TOP_COLOR }
+  const art: TileArt = buildTileArt(key)
   cache.set(key, art)
   return art
 }
 
+function buildTileArt(key: string): TileArt {
+  if (key === CASTLE_THEME) {
+    return {
+      texture: createBrickTexture(),
+      color: CASTLE_BRICK_COLOR,
+      instanceTint: CASTLE_INSTANCE_TINT,
+    }
+  }
+  if (key === UNDERGROUND_THEME) {
+    return {
+      texture: createUndergroundDetailTexture(),
+      color: UNDERGROUND_ROCK_COLOR,
+      instanceTint: UNDERGROUND_ROCK_COLOR,
+    }
+  }
+  return { texture: createGroundDetailTexture(), color: GRASS_TOP_COLOR }
+}
+
 /**
- * Maps a theme's tile art onto a mesh's material(s), in place.
+ * Maps a theme's tile art onto a mesh's material(s), in place, and repaints the per-instance
+ * palette when the theme owns one.
  *
- * Deliberately touches only `map`: `material.color` and any `instanceColor` are left exactly
- * as the caller set them, so this is safe to call on a palette-tinted InstancedMesh — the
- * grayscale ground map multiplies with those per-instance hues rather than overriding them.
+ * `material.color` is never touched — a caller's flat layer color survives. `instanceColor` is
+ * only ever overwritten, never allocated: creating the buffer here would silently override the
+ * `color` a consumer chose for a mesh that deliberately has no per-instance palette.
+ *
+ * Grass declares no `instanceTint`, so the grass/dirt palette is left exactly as the caller set
+ * it and the grayscale ground map multiplies with those hues. Every other theme repaints,
+ * because the palette it would otherwise inherit — from a mesh built for World 1-1 — is green.
  */
 export function applyTileArt<T extends THREE.Mesh>(mesh: T, theme: string = GRASS_THEME): T {
-  const { texture } = tileArtForTheme(theme)
+  const { texture, instanceTint } = tileArtForTheme(theme)
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 
   for (const material of materials) {
     if (!('map' in material)) continue
     ;(material as THREE.MeshLambertMaterial).map = texture
     material.needsUpdate = true
+  }
+
+  if (instanceTint !== undefined && mesh instanceof THREE.InstancedMesh && mesh.instanceColor) {
+    const color = new THREE.Color().setHex(instanceTint)
+    for (let i = 0; i < mesh.count; i += 1) mesh.setColorAt(i, color)
+    mesh.instanceColor.needsUpdate = true
   }
   return mesh
 }

@@ -2,15 +2,23 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import {
   CASTLE_BRICK_COLOR,
+  CASTLE_INSTANCE_TINT,
   CASTLE_THEME,
+  DIRT_COLOR,
   GRASS_THEME,
   GRASS_TOP_COLOR,
   GROUND_LUMA_FLOOR,
+  SKY_COLOR,
   TILE_ART_SIZE,
+  UNDERGROUND_LUMA_FLOOR,
+  UNDERGROUND_ROCK_COLOR,
+  UNDERGROUND_SKY_COLOR,
+  UNDERGROUND_THEME,
   applyTileArt,
   createBrickTexture,
   createGroundDetailTexture,
   createTileLayer,
+  createUndergroundDetailTexture,
   tileArtForTheme,
 } from '../src/render'
 
@@ -56,9 +64,35 @@ function meanLumaOfRows(texture: THREE.DataTexture, rows: number[]): number {
   return total / (rows.length * texture.image.width)
 }
 
+function meanLumaOfColumns(texture: THREE.DataTexture, columns: number[]): number {
+  let total = 0
+  for (const x of columns) {
+    for (let y = 0; y < texture.image.height; y += 1) total += luma(texel(texture, x, y))
+  }
+  return total / (columns.length * texture.image.height)
+}
+
+/** Mean luma of everything the 1-texel edge groove does not touch. */
+function meanOfInterior(texture: THREE.DataTexture): number {
+  let total = 0
+  let count = 0
+  for (let y = 1; y < texture.image.height - 1; y += 1) {
+    for (let x = 1; x < texture.image.width - 1; x += 1) {
+      total += luma(texel(texture, x, y))
+      count += 1
+    }
+  }
+  return total / count
+}
+
 function meanLuma(texture: THREE.DataTexture): number {
   const all = Array.from({ length: texture.image.height }, (_, y) => y)
   return meanLumaOfRows(texture, all)
+}
+
+/** A palette hex as a texel, so the luma helper can weigh a flat tint like it weighs art. */
+function hexTexel(hex: number): Texel {
+  return { r: (hex >> 16) & 0xff, g: (hex >> 8) & 0xff, b: hex & 0xff, a: 255 }
 }
 
 /** Columns in a row dark enough to be a mortar joint rather than a brick face. */
@@ -134,6 +168,93 @@ describe('createGroundDetailTexture', () => {
 
   test('hands back a fresh texture each call so callers can dispose independently', () => {
     expect(createGroundDetailTexture()).not.toBe(createGroundDetailTexture())
+  })
+})
+
+describe('createUndergroundDetailTexture', () => {
+  test('is a 16x16 RGBA DataTexture flagged for upload', () => {
+    const texture = createUndergroundDetailTexture()
+
+    expect(texture).toBeInstanceOf(THREE.DataTexture)
+    expect(texture.image.width).toBe(TILE_ART_SIZE)
+    expect(texture.image.height).toBe(TILE_ART_SIZE)
+    expect(pixels(texture)).toBeInstanceOf(Uint8Array)
+    expect(pixels(texture).length).toBe(TILE_ART_SIZE * TILE_ART_SIZE * 4)
+    expect(texture.version).toBeGreaterThan(0)
+    expect(texture.flipY).toBe(false)
+
+    everyTexel(texture, (t) => expect(t.a).toBe(255))
+  })
+
+  test('is grayscale, so the rock tint multiplies through it', () => {
+    const texture = createUndergroundDetailTexture()
+
+    everyTexel(texture, (t, x, y) => {
+      expect(`${x},${y}:${t.r},${t.g},${t.b}`).toBe(`${x},${y}:${t.r},${t.r},${t.r}`)
+    })
+  })
+
+  test('sits below the grass floor without crushing to black', () => {
+    const texture = createUndergroundDetailTexture()
+
+    everyTexel(texture, (t) => {
+      expect(t.r).toBeGreaterThanOrEqual(UNDERGROUND_LUMA_FLOOR)
+      expect(t.r).toBeLessThanOrEqual(255)
+    })
+    expect(UNDERGROUND_LUMA_FLOOR).toBeLessThan(GROUND_LUMA_FLOOR)
+  })
+
+  test('is not a flat fill', () => {
+    const shades = new Set<number>()
+    everyTexel(createUndergroundDetailTexture(), (t) => shades.add(t.r))
+
+    expect(shades.size).toBeGreaterThan(4)
+    expect(Math.min(...shades)).toBeLessThan(Math.max(...shades))
+  })
+
+  test('has no lit crown — a cave tile is not sun-lit from above', () => {
+    const texture = createUndergroundDetailTexture()
+
+    const top = meanLumaOfRows(texture, [12, 13, 14, 15])
+    const bottom = meanLumaOfRows(texture, [0, 1, 2, 3])
+
+    // The grass map asserts a 20+ gap here. Underground is vertically symmetric instead.
+    expect(Math.abs(top - bottom)).toBeLessThan(8)
+  })
+
+  test('is symmetric top to bottom, texel for texel', () => {
+    const texture = createUndergroundDetailTexture()
+
+    for (let y = 0; y < TILE_ART_SIZE; y += 1) {
+      for (let x = 0; x < TILE_ART_SIZE; x += 1) {
+        const low = texel(texture, x, y)
+        const high = texel(texture, x, TILE_ART_SIZE - 1 - y)
+        expect(`${x},${y}:${low.r}`).toBe(`${x},${y}:${high.r}`)
+      }
+    }
+  })
+
+  test('cuts a dark groove around all four edges', () => {
+    const texture = createUndergroundDetailTexture()
+    const interior = meanOfInterior(texture)
+
+    expect(meanLumaOfRows(texture, [0])).toBeLessThan(interior - 20)
+    expect(meanLumaOfRows(texture, [TILE_ART_SIZE - 1])).toBeLessThan(interior - 20)
+    expect(meanLumaOfColumns(texture, [0])).toBeLessThan(interior - 20)
+    expect(meanLumaOfColumns(texture, [TILE_ART_SIZE - 1])).toBeLessThan(interior - 20)
+  })
+
+  test('is deterministic and hands back a fresh texture each call', () => {
+    expect(Array.from(pixels(createUndergroundDetailTexture()))).toEqual(
+      Array.from(pixels(createUndergroundDetailTexture())),
+    )
+    expect(createUndergroundDetailTexture()).not.toBe(createUndergroundDetailTexture())
+  })
+
+  test('is its own art, not a copy of the grass ground map', () => {
+    expect(Array.from(pixels(createUndergroundDetailTexture()))).not.toEqual(
+      Array.from(pixels(createGroundDetailTexture())),
+    )
   })
 })
 
@@ -224,6 +345,61 @@ describe('tileArtForTheme', () => {
     expect(tileArtForTheme(CASTLE_THEME).texture).toBe(tileArtForTheme(CASTLE_THEME).texture)
     expect(tileArtForTheme(GRASS_THEME).texture).not.toBe(tileArtForTheme(CASTLE_THEME).texture)
   })
+
+  test('routes underground to its own art rather than the grass fallback', () => {
+    expect(Array.from(pixels(tileArtForTheme(UNDERGROUND_THEME).texture))).toEqual(
+      Array.from(pixels(createUndergroundDetailTexture())),
+    )
+    expect(tileArtForTheme(UNDERGROUND_THEME).texture).not.toBe(
+      tileArtForTheme(GRASS_THEME).texture,
+    )
+
+    expect(tileArtForTheme(UNDERGROUND_THEME).color).toBe(UNDERGROUND_ROCK_COLOR)
+    expect(tileArtForTheme(UNDERGROUND_THEME).color).not.toBe(GRASS_TOP_COLOR)
+  })
+
+  test('memoizes the underground art too', () => {
+    expect(tileArtForTheme(UNDERGROUND_THEME).texture).toBe(
+      tileArtForTheme(UNDERGROUND_THEME).texture,
+    )
+    expect(tileArtForTheme(UNDERGROUND_THEME).texture).not.toBe(
+      tileArtForTheme(CASTLE_THEME).texture,
+    )
+  })
+
+  test('UNDERGROUND_ROCK_COLOR is a cool slate darker than the whole ground palette', () => {
+    const rock = hexTexel(UNDERGROUND_ROCK_COLOR)
+
+    // Blue-dominant: the inverse of the warm brick, which is red-dominant.
+    expect(rock.b).toBeGreaterThan(rock.g)
+    expect(rock.g).toBeGreaterThan(rock.r)
+
+    expect(luma(rock)).toBeLessThan(luma(hexTexel(GRASS_TOP_COLOR)))
+    expect(luma(rock)).toBeLessThan(luma(hexTexel(DIRT_COLOR)))
+  })
+
+  test('only grass declines to repaint the per-instance palette', () => {
+    // Guard against a vacuous pass: with the tint constants missing, both sides of the
+    // comparisons below would read `undefined` and match anyway.
+    expect(typeof UNDERGROUND_ROCK_COLOR).toBe('number')
+    expect(typeof CASTLE_INSTANCE_TINT).toBe('number')
+
+    expect(tileArtForTheme(GRASS_THEME).instanceTint).toBeUndefined()
+    expect(tileArtForTheme(UNDERGROUND_THEME).instanceTint).toBe(UNDERGROUND_ROCK_COLOR)
+    expect(tileArtForTheme(CASTLE_THEME).instanceTint).toBe(CASTLE_INSTANCE_TINT)
+    // An unknown theme is grass, so it must not repaint either.
+    expect(tileArtForTheme('no-such-theme').instanceTint).toBeUndefined()
+  })
+})
+
+describe('UNDERGROUND_SKY_COLOR', () => {
+  test('is a near-black cave void, distinct from the grass sky', () => {
+    const sky = hexTexel(UNDERGROUND_SKY_COLOR)
+
+    expect(luma(sky)).toBeLessThan(40)
+    expect(sky.b).toBeGreaterThan(sky.r)
+    expect(UNDERGROUND_SKY_COLOR).not.toBe(SKY_COLOR)
+  })
 })
 
 describe('applyTileArt', () => {
@@ -282,6 +458,89 @@ describe('applyTileArt', () => {
     expect((mesh.material as THREE.MeshLambertMaterial).map).toBe(
       tileArtForTheme(CASTLE_THEME).texture,
     )
+  })
+
+  function instanceColors(mesh: THREE.InstancedMesh): number[] {
+    return Array.from(mesh.instanceColor!.array)
+  }
+
+  /**
+   * The buffer holds the working-space (linear) triples `Color.setHex` decodes an sRGB hex to,
+   * not the hex bytes — so the expectation has to go through THREE.Color the same way.
+   */
+  function expectedTint(hex: number, instances: number): number[] {
+    const rgb = new THREE.Color().setHex(hex).toArray()
+    return Array.from({ length: instances }, () => rgb).flat()
+  }
+
+  test('overwrites the grass palette with rock for the underground theme', () => {
+    const mesh = paletteMesh()
+    const version = mesh.instanceColor!.version
+
+    applyTileArt(mesh, UNDERGROUND_THEME)
+
+    const expected = expectedTint(UNDERGROUND_ROCK_COLOR, mesh.count)
+    expect(instanceColors(mesh)).toHaveLength(expected.length)
+    instanceColors(mesh).forEach((value, i) => expect(value).toBeCloseTo(expected[i]!, 5))
+
+    // BufferAttribute.needsUpdate is set-only; the version bump is the observable effect.
+    expect(mesh.instanceColor!.version).toBeGreaterThan(version)
+    expect((mesh.material as THREE.MeshLambertMaterial).map).toBe(
+      tileArtForTheme(UNDERGROUND_THEME).texture,
+    )
+    // The base color is still the caller's; only the per-instance palette is repainted.
+    expect((mesh.material as THREE.MeshLambertMaterial).color.getHex()).toBe(0xffffff)
+  })
+
+  test('the repainted underground tiles are darker than the grass they replaced', () => {
+    const before = paletteMesh()
+    const after = paletteMesh()
+
+    applyTileArt(after, UNDERGROUND_THEME)
+
+    const sum = (values: number[]) => values.reduce((total, v) => total + v, 0)
+    expect(sum(instanceColors(after))).toBeLessThan(sum(instanceColors(before)))
+  })
+
+  test('overwrites the grass palette with white for castle, so no green leaks into the brick', () => {
+    const mesh = paletteMesh()
+    const version = mesh.instanceColor!.version
+
+    applyTileArt(mesh, CASTLE_THEME)
+
+    const expected = expectedTint(CASTLE_INSTANCE_TINT, mesh.count)
+    instanceColors(mesh).forEach((value, i) => expect(value).toBeCloseTo(expected[i]!, 5))
+    expect(mesh.instanceColor!.version).toBeGreaterThan(version)
+  })
+
+  test('never allocates an instance color buffer that was not already there', () => {
+    const mesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshLambertMaterial({ color: 0x4488ff }),
+      2,
+    )
+
+    applyTileArt(mesh, UNDERGROUND_THEME)
+
+    // Allocating one here would silently override a blockout layer's own opts.color.
+    expect(mesh.instanceColor).toBeNull()
+    expect((mesh.material as THREE.MeshLambertMaterial).map).toBe(
+      tileArtForTheme(UNDERGROUND_THEME).texture,
+    )
+    expect((mesh.material as THREE.MeshLambertMaterial).color.getHex()).toBe(0x4488ff)
+  })
+
+  test('leaves a plain non-instanced mesh alone apart from the map', () => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshLambertMaterial({ color: 0xff00ff }),
+    )
+
+    expect(() => applyTileArt(mesh, UNDERGROUND_THEME)).not.toThrow()
+    expect((mesh.material as THREE.MeshLambertMaterial).map).toBe(
+      tileArtForTheme(UNDERGROUND_THEME).texture,
+    )
+    expect((mesh.material as THREE.MeshLambertMaterial).color.getHex()).toBe(0xff00ff)
   })
 })
 
