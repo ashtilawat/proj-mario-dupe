@@ -124,6 +124,21 @@ describe('createCaveBackdrop', () => {
 
     expect(first).not.toBe(second)
     expect(first.children).toHaveLength(second.children.length)
+
+    // Matching child counts is not the invariant that matters: a refactor that hoisted the
+    // geometries or materials to module scope would leave every assertion above green while
+    // making one cave's dispose() blank the other. Two dome shapes and a cone shape per group,
+    // and none of them the same object across groups.
+    const firstGeometries = new Set(meshesOf(first).map((mesh) => mesh.geometry))
+    const secondGeometries = new Set(meshesOf(second).map((mesh) => mesh.geometry))
+    const firstMaterials = new Set(meshesOf(first).flatMap(materialsOf))
+    const secondMaterials = new Set(meshesOf(second).flatMap(materialsOf))
+    const geometryUnion = new Set([...firstGeometries, ...secondGeometries])
+    const materialUnion = new Set([...firstMaterials, ...secondMaterials])
+
+    expect(geometryUnion.size).toBe(4)
+    // Union equals the sum of the two sides only when neither side lent the other a material.
+    expect(materialUnion.size).toBe(firstMaterials.size + secondMaterials.size)
   })
 
   test('is its own factory, not an alias of the sky backdrop', () => {
@@ -315,6 +330,39 @@ describe('cave palette', () => {
       expect(g).toBeGreaterThanOrEqual(voidChannels.g + 20)
       expect(b).toBeGreaterThanOrEqual(voidChannels.b + 20)
     }
+  })
+
+  test('sinks depth into the mass: near rock reads darker than far, and formations lighter than the rock they grow from', () => {
+    // The predicates above hold for CAVE_FAR_COLOR, CAVE_NEAR_COLOR and FORMATION_COLOR
+    // independently, so swapping the two rock hexes — or dropping the formation hex below the
+    // near rock — would pass every one of them while inverting the entire depth cue the layer
+    // is built on. Read "which row is which" off the geometry (local z), not off the hexes, so
+    // a bad edit to the constants has no way to sneak past this the way it would a hardcoded hex.
+    const cave = createCaveBackdrop()
+    const walls = childrenOfKind(cave, 'cave-wall')
+    const wallDepths = [...new Set(walls.map((wall) => wall.position.z))].sort((a, b) => a - b)
+    expect(wallDepths).toHaveLength(2)
+    const [farZ, nearZ] = wallDepths
+
+    const farLumas = walls.filter((wall) => wall.position.z === farZ).map((wall) => luma(colorOf(wall)))
+    const nearLumas = walls.filter((wall) => wall.position.z === nearZ).map((wall) => luma(colorOf(wall)))
+    // Each row is painted a single flat colour.
+    expect(new Set(farLumas).size).toBe(1)
+    expect(new Set(nearLumas).size).toBe(1)
+
+    // Haze: distance lifts. The near mass is the darkest thing in the layer.
+    // (Math.min rather than [0]: each set was just proven to hold a single value, and this
+    // sidesteps the possibly-undefined that noUncheckedIndexedAccess gives a bare index.)
+    expect(Math.min(...nearLumas)).toBeLessThan(Math.min(...farLumas))
+
+    const formationLumas = [
+      ...childrenOfKind(cave, 'stalactite'),
+      ...childrenOfKind(cave, 'stalagmite'),
+    ].map((mesh) => luma(colorOf(mesh)))
+    expect(new Set(formationLumas).size).toBe(1)
+
+    // A shade up from the near rock, so the spikes keep an edge against the mass they grow out of.
+    expect(Math.min(...formationLumas)).toBeGreaterThan(Math.min(...nearLumas))
   })
 })
 
