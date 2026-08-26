@@ -1,8 +1,9 @@
-// T-007 — M0 boss stand-in: the one and only boss class for this milestone. It is a
-// gray-box placeholder for pattern tuning, deliberately NOT wired into any level yet.
+// T-007 — M0 boss stand-in: the one and only boss class for this milestone. T-050 replaced
+// its gray box with a crowned king, built the way the player (T-033) and the walker (T-030)
+// are: flat-coloured boxes merged into ONE geometry drawn by ONE material.
 //
 // Units: the hitbox is a 2D AABB in TILE space (1 tile = 1.0, bottom-left origin, Y up so
-// vy < 0 is falling). The box mesh is purely cosmetic and lives in WORLD units, where
+// vy < 0 is falling). The king mesh is purely cosmetic and lives in WORLD units, where
 // TILE_SIZE world units make one tile; the mesh bounds are deliberately decoupled from the
 // hitbox so art can grow without changing what the fight feels like.
 //
@@ -11,6 +12,7 @@
 // same stomps, two bosses produce byte-identical traces.
 
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
   GRAVITY,
   STOMP_BOUNCE,
@@ -43,7 +45,14 @@ export interface BossSpawn {
 export const BOSS_WIDTH = 3
 export const BOSS_HEIGHT = 3
 
-/** Mesh size in tiles. Slightly larger than the hitbox: art overhangs, gameplay does not. */
+/**
+ * The art's own silhouette bounds, in tiles. Slightly larger than the hitbox: art
+ * overhangs, gameplay does not. Deliberately NOT the BOSS_WIDTH/BOSS_HEIGHT hitbox
+ * constants — sizing art off the hitbox means retuning the hitbox silently deforms the
+ * king. The king fills all three exactly: 3.5 across at the robe hem, 3.25 hem to crown
+ * tip, 1.5 deep. Interior proportions are authored in BOSS_PARTS below, not derived from
+ * these, so widening a span moves the parts that reference it and leaves the rest put.
+ */
 export const BOSS_MESH_WIDTH = 3.5
 export const BOSS_MESH_HEIGHT = 3.25
 export const BOSS_MESH_DEPTH = 1.5
@@ -67,19 +76,147 @@ export const SLAM_SPEED = 22
 export const CHARGE_SPEED = 8
 export const CHARGE_S = 0.8
 
-/** Gray-box placeholder art until real assets land. */
-const BOSS_COLOR = 0x7a7a7a
-/** Brighter gray during the wind-up, so the tell is visible without any VFX. */
-const TELEGRAPH_COLOR = 0xd6d6d6
+/**
+ * The idle tint, and deliberately NOT white — which is where this parts company with the
+ * player and the walker, who both leave `material.color` alone. Lambert multiplies
+ * material.color by the vertex colour, and `setColor` is this boss's whole telegraph tell,
+ * so the idle tint has to sit below white for the wind-up to have anything to flash up to.
+ * The vertex colours below are authored bright enough to land where they should after it.
+ */
+const BOSS_COLOR = 0xb3b3b3
+/** Warm gold flash during the wind-up, so the tell is visible without any VFX. */
+const TELEGRAPH_COLOR = 0xffe6a3
 
 /** Gameplay entities sit on the Z = 0 plane. */
 const GAMEPLAY_Z = 0
+
+// T-050 king art. Colours are flat-filled per vertex so ONE material draws the robe, the
+// collar, the head and the crown. The mesh has to stay a single Mesh with one geometry and
+// one non-array material: the disposal idiom main.ts uses on boss meshes is
+// `mesh.geometry.dispose(); mesh.material.dispose()`, which a Group of children would leak
+// straight past, and geometry groups would demand a material array a single dispose()
+// cannot free.
+/** The robe hem, shaded: the widest part, and the one that carries the flare. */
+const ROBE_HEM_COLOR = 0x3a2568
+const ROBE_COLOR = 0x5b3a9e
+/** Ermine trim — the one light band in the silhouette, so the head reads off the robe. */
+const COLLAR_COLOR = 0xefe6d8
+const HEAD_COLOR = 0x6f9e4a
+const CROWN_BAND_COLOR = 0xd9a318
+/** The points, a shade brighter than the band: they catch light the flat band does not,
+ * and carrying their own colour is what lets a test see them as three separate spikes. */
+const CROWN_POINT_COLOR = 0xffd75e
+const JEWEL_COLOR = 0xd83c5e
+
+/** Half the height, since every part is placed relative to the mesh centre. */
+const HALF_Y = BOSS_MESH_HEIGHT / 2
+/** Half the width: the robe hem reaches it on both sides, and nothing goes past it. */
+const HALF_X = BOSS_MESH_WIDTH / 2
+
+/** One flat-coloured box of the king, as local bounds in TILES around the mesh centre. */
+interface BossPart {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  depth: number
+  /** Z centre. Only the jewel leaves 0, to sit proud of the crown band's front face. */
+  zOffset?: number
+  color: number
+}
+
+/**
+ * The king, bottom to top, centred on the origin so Y runs -HALF_Y to +HALF_Y and the robe
+ * settles on the hitbox once `syncMesh` parks the mesh on the AABB centre.
+ *
+ * Two wide-over-narrow steps carry the read. The hem flares out past the robe, which is
+ * what makes the bottom say "robe" rather than "column", and the crown band overhangs the
+ * head, which is what makes the top say "crown" rather than "block" — the same trick the
+ * player's hat brim uses. The three points are separate boxes with a 0.34-tile gap between
+ * them, so they never merge into a second band at any zoom.
+ *
+ * Neighbours overlap in Y by 0.03-0.05 so no join can open a seam or z-fight.
+ */
+const BOSS_PARTS: readonly BossPart[] = [
+  {
+    minX: -HALF_X,
+    maxX: HALF_X,
+    minY: -HALF_Y,
+    maxY: -0.6,
+    depth: BOSS_MESH_DEPTH,
+    color: ROBE_HEM_COLOR,
+  },
+  { minX: -1.3, maxX: 1.3, minY: -0.65, maxY: 0.3, depth: 1.25, color: ROBE_COLOR },
+  { minX: -1.45, maxX: 1.45, minY: 0.26, maxY: 0.52, depth: 1.35, color: COLLAR_COLOR },
+  { minX: -0.75, maxX: 0.75, minY: 0.48, maxY: 1.1, depth: 1.05, color: HEAD_COLOR },
+  { minX: -0.9, maxX: 0.9, minY: 1.05, maxY: 1.35, depth: 1.2, color: CROWN_BAND_COLOR },
+  { minX: -0.7, maxX: -0.46, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
+  { minX: -0.12, maxX: 0.12, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
+  { minX: 0.46, maxX: 0.7, minY: 1.32, maxY: HALF_Y, depth: 1.2, color: CROWN_POINT_COLOR },
+  // Sunk 0.05 into the band and standing 0.08 clear of it, still inside BOSS_MESH_DEPTH.
+  {
+    minX: -0.16,
+    maxX: 0.16,
+    minY: 1.09,
+    maxY: 1.31,
+    depth: 0.13,
+    zOffset: 0.615,
+    color: JEWEL_COLOR,
+  },
+]
+
+/** Flat-fill a geometry's vertices so the merged mesh keeps its parts distinguishable. */
+function paint(geometry: THREE.BufferGeometry, hex: number): void {
+  const { r, g, b } = new THREE.Color(hex)
+  const count = geometry.getAttribute('position').count
+  const colors = new Float32Array(count * 3)
+  for (let i = 0; i < count; i += 1) {
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+}
+
+/**
+ * A crown over a head over a robe, merged into ONE geometry. Built in world units, like the
+ * walker's mushroom and unlike the player's character: `syncMesh` positions this mesh in
+ * world units, so the geometry has to be scaled by TILE_SIZE to match its own placement.
+ *
+ * mergeGeometries keeps useGroups false, so the result carries no groups — groups would
+ * demand a material array, which main.ts's single `material.dispose()` cannot free.
+ */
+function createKingGeometry(): THREE.BufferGeometry {
+  const boxes = BOSS_PARTS.map((part) => {
+    const box = new THREE.BoxGeometry(
+      (part.maxX - part.minX) * TILE_SIZE,
+      (part.maxY - part.minY) * TILE_SIZE,
+      part.depth * TILE_SIZE,
+    )
+    box.translate(
+      ((part.minX + part.maxX) / 2) * TILE_SIZE,
+      ((part.minY + part.maxY) / 2) * TILE_SIZE,
+      (part.zOffset ?? 0) * TILE_SIZE,
+    )
+    paint(box, part.color)
+    return box
+  })
+
+  // Typed non-null, but the implementation returns null when attribute sets disagree — fail
+  // here rather than handing main.ts a null geometry to dispose().
+  const merged = mergeGeometries(boxes)
+  if (merged === null) throw new Error('boss: king part attributes are incompatible')
+
+  // Only the merged geometry is reachable from main.ts, so free the sources here.
+  for (const box of boxes) box.dispose()
+  return merged
+}
 
 export class BossStandin implements Body {
   readonly id: number
   readonly aabb: Aabb
   readonly velocity: Vec2
-  readonly mesh: THREE.Mesh<THREE.BoxGeometry, THREE.MeshLambertMaterial>
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>
 
   phase: BossPhase = 1
   state: BossState = 'idle'
@@ -103,12 +240,11 @@ export class BossStandin implements Body {
     this.aabb = { x: spawn.x, y: spawn.y, w: BOSS_WIDTH, h: BOSS_HEIGHT }
     this.velocity = { x: 0, y: 0 }
     this.mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        BOSS_MESH_WIDTH * TILE_SIZE,
-        BOSS_MESH_HEIGHT * TILE_SIZE,
-        BOSS_MESH_DEPTH * TILE_SIZE,
-      ),
-      new THREE.MeshLambertMaterial({ color: BOSS_COLOR }),
+      createKingGeometry(),
+      // Tinted rather than left white the way the player and the walker leave it: see
+      // BOSS_COLOR. setColor drives this tint, and only this tint — the vertex colours are
+      // fixed, so the flash brightens the whole king without repainting a single vertex.
+      new THREE.MeshLambertMaterial({ vertexColors: true, color: BOSS_COLOR }),
     )
     this.syncMesh()
   }

@@ -4,7 +4,14 @@ import * as THREE from 'three'
 import { STOMP_BOUNCE, TILE_SIZE, top } from '../src/physics/index.ts'
 import type { Aabb, TileGrid, TileKind } from '../src/physics/index.ts'
 import * as bossModule from '../src/entities/bosses/standin.ts'
-import { createBossStandin } from '../src/entities/bosses/standin.ts'
+import {
+  BOSS_HEIGHT,
+  BOSS_MESH_DEPTH,
+  BOSS_MESH_HEIGHT,
+  BOSS_MESH_WIDTH,
+  BOSS_WIDTH,
+  createBossStandin,
+} from '../src/entities/bosses/standin.ts'
 import type { BossStandin } from '../src/entities/bosses/standin.ts'
 
 // Rows are written top-down for readability; tile Y is up, so row 0 is the highest ty.
@@ -381,21 +388,147 @@ describe('stomping', () => {
   })
 })
 
-describe('gray-box mesh', () => {
-  test('is a large gray THREE box on the gameplay plane, synced from the hitbox', () => {
+/** One flat-coloured part of the merged geometry: its colour and local bounds. */
+interface Part {
+  color: THREE.Color
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  maxZ: number
+  halfWidth: number
+  /** Every distinct X the part's vertices sit on: box edges, so two per box. */
+  edgesX: number[]
+}
+
+/**
+ * Split the merged geometry into parts by vertex colour, topmost first. The same helper
+ * tests/player-art.test.ts uses, plus `maxZ` and `edgesX`. Partitioning by colour rather
+ * than by a Y band is what lets the seam test see the joins: adjacent parts' Y spans are
+ * allowed to intersect.
+ */
+function meshParts(geometry: THREE.BufferGeometry): Part[] {
+  const position = geometry.getAttribute('position')
+  const color = geometry.getAttribute('color')
+  const byColor = new Map<string, Part>()
+  const edges = new Map<string, Set<number>>()
+
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i)
+    const y = position.getY(i)
+    const z = position.getZ(i)
+    const key = [color.getX(i), color.getY(i), color.getZ(i)].join(',')
+    const part = byColor.get(key)
+
+    if (part) {
+      part.minX = Math.min(part.minX, x)
+      part.maxX = Math.max(part.maxX, x)
+      part.minY = Math.min(part.minY, y)
+      part.maxY = Math.max(part.maxY, y)
+      part.maxZ = Math.max(part.maxZ, z)
+      part.halfWidth = Math.max(part.halfWidth, Math.abs(x))
+    } else {
+      const rgb = new THREE.Color(color.getX(i), color.getY(i), color.getZ(i))
+      byColor.set(key, {
+        color: rgb,
+        minX: x,
+        maxX: x,
+        minY: y,
+        maxY: y,
+        maxZ: z,
+        halfWidth: Math.abs(x),
+        edgesX: [],
+      })
+      edges.set(key, new Set())
+    }
+    // Rounded, because the merged attribute is Float32 and a box edge lands a few ulps off.
+    edges.get(key)!.add(Math.round(x * 1000) / 1000)
+  }
+
+  for (const [key, part] of byColor) part.edgesX = [...edges.get(key)!].sort((a, b) => a - b)
+  return [...byColor.values()].sort((a, b) => b.maxY - a.maxY)
+}
+
+/** The king, top to bottom, as the colour partition orders him. */
+function kingParts(): [Part, Part, Part, Part, Part, Part, Part] {
+  return meshParts(spawnBoss().mesh.geometry) as [Part, Part, Part, Part, Part, Part, Part]
+}
+
+describe('king mesh', () => {
+  test('is one Mesh with a single Lambert material and no geometry groups', () => {
     const boss = spawnBoss()
 
     expect(boss.mesh).toBeInstanceOf(THREE.Mesh)
-    expect(boss.mesh.geometry.type).toBe('BoxGeometry')
+    // A Group of child meshes would slip straight past the `mesh.geometry.dispose();
+    // mesh.material.dispose()` idiom main.ts frees every boss with.
+    expect(boss.mesh.children).toHaveLength(0)
+    expect(Array.isArray(boss.mesh.material)).toBe(false)
     expect(boss.mesh.material).not.toBeInstanceOf(THREE.MeshStandardMaterial)
     expect(boss.mesh.material).toBeInstanceOf(THREE.MeshLambertMaterial)
+    expect(boss.mesh.material.vertexColors).toBe(true)
+    // Groups would demand a material array, which a single dispose() cannot free.
+    expect(boss.mesh.geometry.groups).toHaveLength(0)
     expect(boss.mesh.position.z).toBe(0)
+  })
 
-    // Much bigger than the 1-tile walker box it shares the screen with.
-    expect(boss.mesh.geometry.parameters.width).toBeGreaterThan(TILE_SIZE)
-    expect(boss.mesh.geometry.parameters.height).toBeGreaterThan(TILE_SIZE)
-    expect(boss.mesh.geometry.parameters.width).toBeGreaterThanOrEqual(3 * TILE_SIZE)
-    expect(boss.mesh.geometry.parameters.height).toBeGreaterThanOrEqual(3 * TILE_SIZE)
+  test('carries a per-vertex colour attribute', () => {
+    const geometry = spawnBoss().mesh.geometry
+
+    expect(geometry.type).toBe('BufferGeometry')
+    const color = geometry.getAttribute('color')
+    expect(color).toBeDefined()
+    expect(color.itemSize).toBe(3)
+    expect(color.count).toBe(geometry.getAttribute('position').count)
+  })
+
+  test('is a crowned character, not the flat gray box', () => {
+    const boss = spawnBoss()
+
+    expect(boss.mesh.geometry).not.toBeInstanceOf(THREE.BoxGeometry)
+    // Hem, robe, collar, head, crown band, crown points, jewel: the box had one colour.
+    expect(meshParts(boss.mesh.geometry)).toHaveLength(7)
+  })
+
+  test('fills its own silhouette bounds, centred on the origin', () => {
+    const geometry = spawnBoss().mesh.geometry
+    geometry.computeBoundingBox()
+    const box = geometry.boundingBox!
+    const size = box.getSize(new THREE.Vector3())
+
+    // Measured against the art's own spans, not the hitbox: the whole point of BOSS_MESH_*
+    // is that retuning BOSS_HEIGHT must not drag the king with it.
+    expect(size.x).toBeCloseTo(BOSS_MESH_WIDTH * TILE_SIZE, 3)
+    expect(size.y).toBeCloseTo(BOSS_MESH_HEIGHT * TILE_SIZE, 3)
+    expect(size.z).toBeCloseTo(BOSS_MESH_DEPTH * TILE_SIZE, 3)
+
+    // syncMesh parks the mesh on the hitbox centre, so an off-centre silhouette would sink
+    // the robe into the floor or float it above.
+    const center = box.getCenter(new THREE.Vector3())
+    expect(center.x).toBeCloseTo(0, 3)
+    expect(center.y).toBeCloseTo(0, 3)
+    expect(center.z).toBeCloseTo(0, 3)
+  })
+
+  test('is still a wall of a creature next to the 1-tile walker', () => {
+    const geometry = spawnBoss().mesh.geometry
+    geometry.computeBoundingBox()
+    const size = geometry.boundingBox!.getSize(new THREE.Vector3())
+
+    expect(size.x).toBeGreaterThan(TILE_SIZE)
+    expect(size.y).toBeGreaterThan(TILE_SIZE)
+    expect(size.x).toBeGreaterThanOrEqual(3 * TILE_SIZE)
+    expect(size.y).toBeGreaterThanOrEqual(3 * TILE_SIZE)
+  })
+
+  test('art is decoration: the hitbox is the same 3x3 it always was', () => {
+    // The ONE place the art is tied to the hitbox, so the coupling is stated rather than
+    // smeared across every dimension assertion.
+    expect(BOSS_WIDTH).toBe(3)
+    expect(BOSS_HEIGHT).toBe(3)
+
+    const boss = spawnBoss()
+    expect(boss.aabb.w).toBe(BOSS_WIDTH)
+    expect(boss.aabb.h).toBe(BOSS_HEIGHT)
   })
 
   test('follows the hitbox in world units as the fight plays out', () => {
@@ -411,14 +544,109 @@ describe('gray-box mesh', () => {
     expect(boss.mesh.position.z).toBe(0)
   })
 
-  test('flashes a brighter gray while telegraphing', () => {
+  test('is painted in a royal palette, not arbitrary colours', () => {
+    const [points, band, jewel, head, collar, robe, hem] = kingParts()
+
+    // Asserted as channel ratios, not hex: THREE.Color runs a hex through the working
+    // colour space, so the stored values are not the literals in standin.ts.
+    for (const gold of [band, points]) {
+      expect(gold.color.r).toBeGreaterThan(gold.color.g)
+      expect(gold.color.g).toBeGreaterThan(gold.color.b)
+    }
+    // The points catch the light the band does not, which is what separates them from it.
+    expect(points.color.r).toBeGreaterThan(band.color.r)
+    expect(points.color.g).toBeGreaterThan(band.color.g)
+
+    // Robe and hem are purple: blue-dominant with red over green.
+    for (const purple of [robe, hem]) {
+      expect(purple.color.b).toBeGreaterThan(purple.color.r)
+      expect(purple.color.r).toBeGreaterThan(purple.color.g)
+    }
+    // The hem is the shaded underside of the same robe, so it must be darker but still purple.
+    expect(hem.color.r).toBeLessThan(robe.color.r)
+    expect(hem.color.b).toBeLessThan(robe.color.b)
+
+    // Ermine collar: bright and near-neutral, the one light band in the silhouette.
+    expect(Math.min(collar.color.r, collar.color.g, collar.color.b)).toBeGreaterThan(0.5)
+    expect(collar.color.r - collar.color.b).toBeLessThan(0.25)
+
+    // Green head, so the boss is nobody's palette but his own — the player is yellow-headed.
+    expect(head.color.g).toBeGreaterThan(head.color.r)
+    expect(head.color.g).toBeGreaterThan(head.color.b)
+
+    // Rose jewel: red-dominant, but blue over green so it cannot be mistaken for the gold.
+    expect(jewel.color.r).toBeGreaterThan(jewel.color.b)
+    expect(jewel.color.b).toBeGreaterThan(jewel.color.g)
+  })
+
+  test('reads as a king: the crown overhangs the head and the robe flares out', () => {
+    const [points, band, , head, , robe, hem] = kingParts()
+    const halfY = (BOSS_MESH_HEIGHT / 2) * TILE_SIZE
+
+    // Wide-over-narrow, twice. The band over the head is what makes the top say "crown"
+    // rather than "block"; the hem over the robe is what makes the bottom say "robe".
+    expect(band.halfWidth).toBeGreaterThan(head.halfWidth)
+    expect(hem.halfWidth).toBeGreaterThan(robe.halfWidth)
+    // The points are the top of the silhouette and the hem is the bottom of it.
+    expect(points.maxY).toBeCloseTo(halfY, 3)
+    expect(hem.minY).toBeCloseTo(-halfY, 3)
+    // The crown sits on the head, not beside it.
+    expect(band.minY).toBeGreaterThan(head.minY)
+  })
+
+  test('the crown has three separate points, not one gold slab', () => {
+    const [points] = kingParts()
+
+    // Three boxes means six distinct X edges. A solid slab would have exactly two.
+    expect(points.edgesX).toHaveLength(6)
+    for (let i = 0; i < points.edgesX.length; i += 2) {
+      const left = points.edgesX[i]!
+      const right = points.edgesX[i + 1]!
+      const nextLeft = points.edgesX[i + 2]
+      expect(right).toBeGreaterThan(left)
+      // A real gap between the points, so they never merge into a band at any zoom.
+      if (nextLeft !== undefined) expect(nextLeft).toBeGreaterThan(right)
+    }
+  })
+
+  test('the jewel sits proud of the crown band', () => {
+    const [, band, jewel] = kingParts()
+
+    // The one part off the Z centre: it catches the light the flat front face cannot.
+    expect(jewel.maxZ).toBeGreaterThan(band.maxZ)
+  })
+
+  test('overlaps at every join, so no seam can open', () => {
+    const parts = kingParts()
+
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const upper = parts[i]!
+      const lower = parts[i + 1]!
+      expect(lower.maxY).toBeGreaterThan(upper.minY)
+    }
+  })
+
+  test('flashes gold while telegraphing, then settles back', () => {
     const boss = spawnBoss()
-    const idleColor = boss.mesh.material.color.getHex()
+    const idle = boss.mesh.material.color.clone()
+
+    // Deliberately NOT white, unlike the player and the walker: Lambert multiplies
+    // material.color by the vertex colour, and this tint is the telegraph tell, so white
+    // would leave no headroom to flash upward.
+    expect(idle.getHex()).not.toBe(0xffffff)
+    expect(Math.max(idle.r, idle.g, idle.b)).toBeLessThan(1)
 
     stepUntil(boss, (b) => b.telegraphing)
-    const telegraphColor = boss.mesh.material.color.getHex()
+    const flash = boss.mesh.material.color.clone()
 
-    expect(telegraphColor).not.toBe(idleColor)
+    expect(flash.getHex()).not.toBe(idle.getHex())
+    // Brighter overall and warmer with it, so the wind-up reads without any VFX.
+    expect(flash.r + flash.g + flash.b).toBeGreaterThan(idle.r + idle.g + idle.b)
+    expect(flash.r).toBeGreaterThan(idle.r)
+    expect(flash.g).toBeGreaterThan(idle.g)
+
+    stepUntil(boss, (b) => b.state === 'attack')
+    expect(boss.mesh.material.color.getHex()).toBe(idle.getHex())
   })
 })
 
