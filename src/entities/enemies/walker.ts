@@ -115,10 +115,17 @@ export class Walker implements Body {
     this.dir = this.dir === 1 ? -1 : 1
   }
 
-  /** Would the tile under the leading foot still support the walker after this step? */
+  /**
+   * Would the tile ahead of the leading foot still support the walker?
+   * Lookahead is at least one tile (not just this step's dt) so a 1-1 walker
+   * walking left into the pit at tx 10-11 turns on the last solid tile instead
+   * of reaching the rim — and a large dt cannot skip the empty cells.
+   */
   private hasGroundAhead(dt: number, grid: TileGrid): boolean {
-    const nextX = this.aabb.x + this.dir * WALKER_PATROL_SPEED * dt
-    const footX = this.dir > 0 ? nextX + this.aabb.w - PROBE_EPS : nextX + PROBE_EPS
+    const leadX =
+      this.dir > 0 ? this.aabb.x + this.aabb.w - PROBE_EPS : this.aabb.x + PROBE_EPS
+    const look = Math.max(Math.abs(WALKER_PATROL_SPEED * dt), 1 - PROBE_EPS)
+    const footX = leadX + this.dir * look
     const tx = Math.floor(footX)
     const ty = Math.floor(this.aabb.y - PROBE_EPS)
     if (tx < 0 || tx >= grid.width || ty < 0 || ty >= grid.height) return false

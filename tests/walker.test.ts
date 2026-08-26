@@ -92,11 +92,46 @@ describe('patrol', () => {
 
     for (let i = 0; i < 300; i += 1) walker.step(DT, LEDGE)
 
-    expect(walker.dir).toBe(-1)
-    // Floor tiles are tx 0..4, so support ends at x = 5. Tolerance covers the float
-    // drift of accumulating many fixed steps (the wall case snaps exactly, this one does not).
+    // Floor tiles are tx 0..4, so support ends at x = 5. A one-tile lookahead also
+    // treats x = 0 as a ledge, so after 300 steps the walker may already be facing
+    // right again — the invariant is it never walked off.
+    expect(walker.aabb.x).toBeGreaterThanOrEqual(0)
     expect(walker.aabb.x + walker.aabb.w).toBeLessThanOrEqual(5 + 1e-6)
     expect(walker.aabb.y).toBeCloseTo(1, 6)
+  })
+
+  // 1-1 floor: tiles 0-9 solid, 10-11 pit, 12-23 solid. Spawn is (16, 1) facing left.
+  const ONE_ONE_FLOOR = makeGrid([
+    '........................',
+    '##########..############',
+  ])
+
+  test('1-1 walker walking left turns at the pit instead of falling in', () => {
+    const walker = createWalker({ x: 16, y: 1, dir: -1 })
+
+    for (let i = 0; i < 120 * 8; i += 1) walker.step(DT, ONE_ONE_FLOOR)
+
+    expect(walker.aabb.y).toBeCloseTo(1, 5)
+    expect(walker.aabb.x).toBeGreaterThanOrEqual(12)
+    expect(walker.aabb.x + walker.aabb.w).toBeLessThanOrEqual(24)
+  })
+
+  test('1-1 walker patrols the right-hand shelf and never enters the pit', () => {
+    const walker = createWalker({ x: 16, y: 1, dir: -1 })
+    let sawLeft = false
+    let sawRight = false
+
+    for (let i = 0; i < 120 * 20; i += 1) {
+      walker.step(DT, ONE_ONE_FLOOR)
+      expect(walker.aabb.y).toBeCloseTo(1, 5)
+      expect(walker.aabb.x).toBeGreaterThanOrEqual(12)
+      expect(walker.aabb.x + walker.aabb.w).toBeLessThanOrEqual(24)
+      if (walker.dir === -1) sawLeft = true
+      if (walker.dir === 1) sawRight = true
+    }
+
+    expect(sawLeft).toBe(true)
+    expect(sawRight).toBe(true)
   })
 })
 
