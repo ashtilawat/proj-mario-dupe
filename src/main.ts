@@ -27,7 +27,7 @@ import {
 } from './render/index.ts'
 // Aliased: `title` is also the name of the live card below, and the story module owns the
 // copy while `createTitle` owns the DOM.
-import { title as storyTitle } from './story/index.ts'
+import { flagLines, title as storyTitle } from './story/index.ts'
 import { createHud, createTitle } from './ui/index.ts'
 import type { Hud, Title } from './ui/index.ts'
 import { createDebugOverlay, parseLevelHash } from './debug/index.ts'
@@ -372,6 +372,83 @@ export const WIN_TEXT = 'YOU WIN'
 /** The card sits above the HUD, which owns z-index 10. */
 export const END_OVERLAY_Z_INDEX = 20
 
+/**
+ * How long a flag's line stays up before the run moves on, in seconds of simulated time.
+ * Long enough to read a short sentence, short enough that it never reads as a stall — and
+ * counted in `simulate` dt rather than wall clock, so it is the same beat on every machine.
+ */
+export const FLAG_TOAST_S = 1.3
+
+/** The toast sits above the HUD but under the end cards: a win still lands on top of it. */
+export const FLAG_TOAST_Z_INDEX = 15
+
+interface FlagToast {
+  readonly element: HTMLElement
+  show(text: string): void
+  hide(): void
+  dispose(): void
+}
+
+/**
+ * The banner a level's flag line goes up on. Local DOM for the same reason the end card is:
+ * `src/ui` owns the persistent HUD, while this belongs to one moment in the run. A band
+ * across the lower half rather than a full-screen card, because the player is meant to keep
+ * looking at the level they just finished — and because this is not an end card, which is
+ * the distinction the darkened backdrop of `createEndOverlay` carries.
+ */
+function createFlagToast(): FlagToast {
+  const root = document.createElement('div')
+  root.dataset.flagToast = ''
+  root.setAttribute('role', 'status')
+  root.setAttribute('aria-live', 'polite')
+  root.style.position = 'absolute'
+  root.style.left = '0'
+  root.style.right = '0'
+  root.style.bottom = '12%'
+  root.style.zIndex = String(FLAG_TOAST_Z_INDEX)
+  root.style.pointerEvents = 'none'
+  root.style.display = 'none'
+  root.style.justifyContent = 'center'
+
+  const label = document.createElement('span')
+  label.dataset.flagToastText = ''
+  label.style.padding = '10px 20px'
+  label.style.borderRadius = '10px'
+  label.style.background = 'rgba(0, 0, 0, 0.65)'
+  label.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace'
+  label.style.fontSize = '20px'
+  label.style.fontWeight = '700'
+  label.style.letterSpacing = '0.04em'
+  label.style.color = '#fff'
+  label.style.textShadow = '0 2px 0 #000'
+  root.append(label)
+
+  return {
+    element: root,
+    show(text) {
+      label.textContent = text
+      root.style.display = 'flex'
+    },
+    hide() {
+      label.textContent = ''
+      root.style.display = 'none'
+    },
+    dispose() {
+      root.remove()
+    },
+  }
+}
+
+/**
+ * The line for a level, or `undefined` for an id World 1 has no copy for. The widening is
+ * the whole point: `flagLines` is keyed on the seven World 1 ids, while a run can be on any
+ * id the loader accepts — a debug warp, a level authored ahead of its copy.
+ */
+function flagLineFor(id: string): string | undefined {
+  const lines: Readonly<Record<string, string | undefined>> = flagLines
+  return lines[id]
+}
+
 /** What the run is doing. Anything but `playing` freezes the simulation. */
 type RunMode = 'playing' | 'gameover' | 'win'
 
@@ -545,6 +622,11 @@ export function startGame(
   const endOverlay = createEndOverlay()
   container.appendChild(endOverlay.element)
 
+  // Mounted for the whole run and hidden between flags, exactly like the end card, so the
+  // banner is queryable at any point rather than only during its beat.
+  const flagToast = createFlagToast()
+  container.appendChild(flagToast.element)
+
   // Last, so the curtain sits on top of the end card as well as the HUD: both of those use
   // z-index 20, and DOM order is what breaks the tie. `createTitle` starts visible, and
   // `title.visible` IS this run's "not started yet" flag — a second boolean could drift.
@@ -610,12 +692,25 @@ export function startGame(
   let mode: RunMode = 'playing'
 
   /**
+   * Seconds of simulated time the flag toast still has on screen. Above zero the run is
+   * frozen behind the line and the flag that raised it has NOT advanced yet — the swap is
+   * what happens when this reaches zero, in `simulate`. It doubles as the "a flag is already
+   * being taken" latch: a frozen run reaches no flag, so the second one cannot fire.
+   */
+  let flagToastLeft = 0
+
+  /**
    * Swaps the whole world over to `id`: tiles, walkers, flags, spawn and checkpoint, with
    * the player put down on the new spawn at rest. Throws for a level the loader does not
    * know — `loadLevel` runs first, so a failed swap leaves the current level untouched.
    */
   function applyLevel(id: string): void {
     const next = loadLevel(id)
+    // Whatever raised the toast, this level is not it any more: the beat belongs to the
+    // level being left. After `loadLevel`, so a swap that throws leaves the toast alone —
+    // and it covers the restart and the hash warp as well as the flag's own advance.
+    flagToastLeft = 0
+    flagToast.hide()
     currentId = id
     level = next
     tileGrid = createTileGridFromLevel(id)
@@ -771,8 +866,9 @@ export function startGame(
     // Held keys repeat their keydown; one press is one chirp.
     if (spaceHeld) return
     spaceHeld = true
-    // Same freeze rule the loop follows: no chirp for a Space pressed into a card.
-    if (title.visible || mode !== 'playing') return
+    // Same freeze rule the loop follows: no chirp for a Space pressed into a card, or into
+    // the flag toast — the run is not stepping behind any of the three, so there is no jump.
+    if (title.visible || mode !== 'playing' || flagToastLeft > 0) return
     playSfx('jump')
     prevJump = true
   }
@@ -797,7 +893,7 @@ export function startGame(
       // firing whatever control holds focus. Either one reads as the card being dismissed
       // by Space, over a run the game still has frozen behind it. Enter ends a card; this
       // is what keeps Space from looking like it does.
-      if (title.visible || mode !== 'playing') event.preventDefault()
+      if (title.visible || mode !== 'playing' || flagToastLeft > 0) event.preventDefault()
       return
     }
     if (event.key !== 'Enter') return
@@ -810,6 +906,8 @@ export function startGame(
       title.hide()
       return
     }
+    // A flag toast keeps `mode` on 'playing', which is exactly what makes Enter inert while
+    // it is up: the toast is a beat in a live run, not a card waiting to be dismissed.
     if (mode === 'playing') return
     restart()
   }
@@ -867,6 +965,22 @@ export function startGame(
         // Consume the jump edge even while frozen so a Space held through the title
         // does not chirp the moment the run starts.
         prevJump = state.jump
+        return
+      }
+
+      // T-052. The third freeze, and the only one that ends by itself: a flag has been taken
+      // and its line is up, so the level the player just finished holds still under it. The
+      // beat is counted in simulated dt like everything else here, and running out is what
+      // finally calls `advance` — the flag itself no longer does.
+      if (flagToastLeft > 0) {
+        prevJump = state.jump
+        flagToastLeft -= dt
+        if (flagToastLeft > 0) return
+        flagToastLeft = 0
+        // Down BEFORE the swap: `advance` may raise the win card, and the line for the level
+        // just finished has no business sitting under it.
+        flagToast.hide()
+        advance()
         return
       }
 
@@ -986,15 +1100,25 @@ export function startGame(
         loseLife()
       }
 
-      // The level exit. No "already touched" latch is needed: taking a flag either ends the
-      // run or moves the player onto the next level's spawn, so the overlap cannot re-fire.
+      // The level exit. No "already touched" latch is needed: taking a flag raises the toast
+      // above, which freezes the run before this line can be reached a second time — and the
+      // beat ends on the next level's spawn or on the win card, neither of which overlaps.
       if (mode !== 'playing') return
       for (const flag of flags) {
         if (!overlaps(aabb, flag)) continue
-        // Before `advance`, which may swap the level out or raise the win card: the fanfare
-        // belongs to taking the flag either way.
+        // Before anything else, and once per take: the fanfare belongs to touching the flag,
+        // not to the swap that eventually follows it.
         playSfx('flag')
-        advance()
+        // T-052. The level gets a beat to say its line before it is swapped out. A level with
+        // no line has nothing to hold the run for, so it advances on this frame as it always
+        // did — a silent, empty banner would be a stall with nothing to show for it.
+        const line = flagLineFor(currentId)
+        if (line === undefined) {
+          advance()
+          break
+        }
+        flagToast.show(line)
+        flagToastLeft = FLAG_TOAST_S
         break
       }
     },
@@ -1034,6 +1158,7 @@ export function startGame(
       window.removeEventListener('hashchange', onHashChange)
       overlay.dispose()
       endOverlay.dispose()
+      flagToast.dispose()
       title.unmount()
       hud.unmount()
       if (tiles) {

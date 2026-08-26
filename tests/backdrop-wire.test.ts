@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { FRUSTUM_HEIGHT, startGame } from '../src/main'
 import type { Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -71,6 +72,8 @@ function touchFlag(game: Game): void {
   game.player.body.aabb.x = 22
   game.player.body.aabb.y = 1
   game.loop.tick(1 / 120)
+  // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+  elapseFlagToast(game)
   expect(game.grid.width).not.toBe(widthBefore)
 }
 

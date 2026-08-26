@@ -18,6 +18,7 @@ vi.mock('../src/audio/index.ts', async (importOriginal) => {
 import * as THREE from 'three'
 import { playSfx } from '../src/audio/index.ts'
 import { NEXT_LEVEL, START_LEVEL, START_LIVES, startGame, type Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { loadLevel } from '../src/levels/index.ts'
 import { STOMP_BOUNCE, TILE_SIZE } from '../src/physics/index.ts'
 
@@ -78,6 +79,8 @@ function takeFlagOf(game: Game, id: string): void {
   game.player.body.aabb.x = flag.at[0]
   game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
+  // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+  elapseFlagToast(game)
 }
 
 /**

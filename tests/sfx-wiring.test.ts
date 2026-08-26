@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as THREE from 'three'
 import { START_LEVEL, START_LIVES, startGame, type Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { loadLevel } from '../src/levels/index.ts'
 
 const { playSfx } = vi.hoisted(() => ({ playSfx: vi.fn() }))
@@ -81,6 +82,8 @@ function takeFlag(game: Game, id: string): void {
   game.player.body.aabb.x = flag.at[0]
   game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
+  // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+  elapseFlagToast(game)
 }
 
 describe('jump', () => {

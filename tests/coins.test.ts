@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { NEXT_LEVEL, START_LEVEL, createCoins, startGame, type Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { loadLevel } from '../src/levels/index.ts'
 import { FIXED_DT } from '../src/engine/index.ts'
 import { COIN_SPIN_SPEED } from '../src/entities/pickups/coin.ts'
@@ -52,6 +53,8 @@ function takeFlag(game: Game, id: string): void {
   game.player.body.aabb.x = flag.at[0]
   game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
+  // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+  elapseFlagToast(game)
 }
 
 /** Parks the player on a coin's hitbox so the next step collects it. */

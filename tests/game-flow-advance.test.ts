@@ -15,6 +15,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import * as THREE from 'three'
 import { START_LEVEL, START_LIVES, startGame } from '../src/main'
 import type { Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import type { Level } from '../src/levels/index.ts'
 
 const { WORLD_1_2 } = vi.hoisted(() => ({
@@ -86,6 +87,9 @@ function touchFlag(game: Game): void {
   game.player.body.aabb.x = 22
   game.player.body.aabb.y = 1
   game.loop.tick(1 / 120)
+  // T-052: the touch raises 1-1's story line and freezes the run behind it. The swap this
+  // whole file is about happens when that beat runs out, not on the frame of the touch.
+  elapseFlagToast(game)
 }
 
 describe('the flag, with the next level registered', () => {
@@ -181,6 +185,9 @@ describe('the flag, with the next level registered', () => {
     game.player.body.aabb.x = 7
     game.player.body.aabb.y = 1
     game.loop.tick(1 / 120)
+    // The synthetic level wears the id 1-2, so it has a story line of its own and takes the
+    // same beat before the run ends on it.
+    elapseFlagToast(game)
 
     expect(container.querySelector<HTMLElement>('[data-game-overlay]')?.dataset.mode).toBe('win')
   })

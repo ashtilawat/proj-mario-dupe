@@ -13,6 +13,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { START_LIVES, startGame, type Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { STOMP_BOUNCE, overlaps } from '../src/physics/index.ts'
 import { createWalker } from '../src/entities/enemies/walker.ts'
 
@@ -224,9 +225,11 @@ describe('what the latch must not swallow', () => {
     game.walkers.push(createWalker({ x: 22, y: 1, dir: 1, id: 0 }))
     standAt(game, 22.2)
 
-    // One tick: the walker bills and latches, then the flag underneath advances the run.
+    // One tick: the walker bills and latches, then the flag underneath takes the level's
+    // story line up. T-052 puts the swap at the end of that beat rather than on this tick.
     game.loop.tick(STEP)
     expect(game.hud.getState().lives).toBe(START_LIVES - 1)
+    elapseFlagToast(game)
 
     // Alone on the new level, long enough for the flag bump's i-frames to lapse.
     game.walkers.splice(0, game.walkers.length)

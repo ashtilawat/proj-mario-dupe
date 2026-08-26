@@ -27,6 +27,7 @@ import { TILE_SIZE } from '../src/physics/index.ts'
 import { GAMEPLAY_Z } from '../src/render/index.ts'
 import { START_LEVEL, createFlagArt, createFlags, startGame } from '../src/main'
 import type { Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { loadLevel } from '../src/levels/index.ts'
 
 describe('the flag art', () => {
@@ -149,6 +150,8 @@ function touchFlag(game: Game): void {
   game.player.body.aabb.x = 22
   game.player.body.aabb.y = 1
   game.loop.tick(1 / 120)
+  // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+  elapseFlagToast(game)
 }
 
 afterEach(() => {

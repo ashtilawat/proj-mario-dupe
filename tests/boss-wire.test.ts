@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { NEXT_LEVEL, START_LEVEL, createBosses, startGame, type Game } from '../src/main'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 import { loadLevel } from '../src/levels/index.ts'
 import { TILE_SIZE } from '../src/physics/index.ts'
 import { BOSS_HEIGHT, BOSS_WIDTH, IDLE_S } from '../src/entities/bosses/standin.ts'
@@ -58,6 +59,8 @@ function reachTheCastle(game: Game): void {
     game.player.body.aabb.x = flag.at[0]
     game.player.body.aabb.y = flag.at[1]
     game.loop.tick(1 / 120)
+    // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
+    elapseFlagToast(game)
     id = NEXT_LEVEL[id]
   }
   if (id !== CASTLE) throw new Error('the flag chain no longer ends at ' + CASTLE)

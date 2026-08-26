@@ -11,6 +11,7 @@ import {
   type Game,
 } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
+import { elapseFlagToast } from './helpers/flag-toast.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -84,6 +85,9 @@ function winTheRun(game: Game): void {
     game.player.body.aabb.x = flag.at[0]
     game.player.body.aabb.y = flag.at[1]
     game.loop.tick(1 / 120)
+    // T-052: every flag holds its level for a beat before it advances, the castle's
+    // included — the win card is on the far side of the last line, not of the last touch.
+    elapseFlagToast(game)
     id = NEXT_LEVEL[id]
   }
 }
