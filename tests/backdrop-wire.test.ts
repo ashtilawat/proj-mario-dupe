@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { startGame } from '../src/main'
+import { FRUSTUM_HEIGHT, startGame } from '../src/main'
 import type { Game } from '../src/main'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
@@ -110,6 +110,95 @@ describe('the live scene carries the sky backdrop', () => {
 
     expect(tiles).toBeDefined()
     expect(backdropZ).toBeLessThan(tiles!.getWorldPosition(new THREE.Vector3()).z)
+  })
+})
+
+/**
+ * World-space [min, max] the given meshes cover along one axis.
+ *
+ * The caller must have flushed the scene's world matrices first — see `hillsOf`. Box3 reads
+ * `matrixWorld`, and a group whose position was set but never flushed still measures at its
+ * old place, which quietly turns every assertion below into a measurement of nothing.
+ */
+function spanOf(meshes: THREE.Mesh[], axis: 'x' | 'y'): [number, number] {
+  const box = new THREE.Box3()
+  for (const mesh of meshes) box.expandByObject(mesh)
+  return [box.min[axis], box.max[axis]]
+}
+
+/**
+ * The hill meshes, measured where the renderer would draw them. The stub renderer these tests
+ * run against never calls `updateMatrixWorld`, so this stands in for the real WebGLRenderer,
+ * which flushes the whole graph on every `render`.
+ */
+function hillsOf(scene: THREE.Scene): THREE.Mesh[] {
+  scene.updateMatrixWorld(true)
+  return meshesOf(backdropIn(scene)).filter((mesh) => mesh.userData['kind'] === 'hill')
+}
+
+/** The band the orthographic camera actually shows, after `followPlayer` has placed it. */
+function visibleY(game: Game): [number, number] {
+  const half = FRUSTUM_HEIGHT / 2
+  return [game.app.camera.position.y - half, game.app.camera.position.y + half]
+}
+
+function visibleX(game: Game): [number, number] {
+  const { camera } = game.app
+  const half = (camera.right - camera.left) / 2
+  return [camera.position.x - half, camera.position.x + half]
+}
+
+/**
+ * T-041 authored the hills against a camera centred on y = 0 — tests/backdrop.test.ts pins the
+ * ridge against a floor of -FRUSTUM_HEIGHT / 2. The live camera is not there: `followPlayer`
+ * parks it at CAMERA_Y and slides it along the level. Reconciling those two frames is wiring,
+ * so it belongs to main.ts and is asserted here rather than over in the module's own suite.
+ */
+describe('the backdrop is where the live camera can see it', () => {
+  test('puts every hill row on screen, not below it', () => {
+    const { game } = start()
+    game.loop.tick(1 / 120)
+    const [floor, ceiling] = visibleY(game)
+
+    const hills = hillsOf(game.scene)
+    expect(hills).toHaveLength(5)
+    for (const hill of hills) {
+      const [base, top] = spanOf([hill], 'y')
+      // Top above the floor or the hill renders nowhere; base below it or sky shows under
+      // the ridge. The near row is what fails when the frame is left unreconciled.
+      expect(top).toBeGreaterThan(floor)
+      expect(base).toBeLessThan(floor)
+      expect(top).toBeLessThan(ceiling)
+    }
+  })
+
+  test('keeps the ridge across the whole screen at the level start', () => {
+    const { game } = start()
+    game.loop.tick(1 / 120)
+
+    const [left, right] = visibleX(game)
+    const [ridgeLeft, ridgeRight] = spanOf(hillsOf(game.scene), 'x')
+
+    expect(ridgeLeft).toBeLessThanOrEqual(left)
+    expect(ridgeRight).toBeGreaterThanOrEqual(right)
+  })
+
+  test('keeps the ridge across the whole screen at the level end', () => {
+    const { game } = start()
+    // Far enough right that `followPlayer` pins the camera to its clamp, which is where a
+    // backdrop parked in world space runs out of hills and leaves bare sky.
+    const startX = game.app.camera.position.x
+    game.player.body.aabb.x = game.grid.width - 2
+    game.player.body.aabb.y = 1
+    game.loop.tick(1 / 120)
+
+    const [left, right] = visibleX(game)
+    const [ridgeLeft, ridgeRight] = spanOf(hillsOf(game.scene), 'x')
+
+    // Guards the two below: they are vacuous if the camera never actually travelled.
+    expect(game.app.camera.position.x).toBeGreaterThan(startX)
+    expect(ridgeLeft).toBeLessThanOrEqual(left)
+    expect(ridgeRight).toBeGreaterThanOrEqual(right)
   })
 })
 

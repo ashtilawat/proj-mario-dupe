@@ -466,6 +466,11 @@ export function startGame(
   // `applyLevel`: the art carries no level-specific state, so swapping worlds would churn
   // GPU objects for an identical picture.
   const backdrop = createBackdrop()
+  // T-041 authored the layer against a camera centred on y = 0; `followPlayer` parks the live
+  // one at CAMERA_Y and never moves it off. Lifting the group by exactly that much reconciles
+  // the two frames — without it the near hill row tops out below the frustum floor and never
+  // draws at all. A constant, not a per-frame update: the camera's Y is fixed.
+  backdrop.position.y = CAMERA_Y
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
   // Filled by `applyLevel`, never reassigned: these arrays are the ones handed out on Game.
@@ -479,8 +484,8 @@ export function startGame(
   const bossLayer = createBossLayer(bosses)
   const flagLayer = createFlagLayer(flagArt)
   scene.add(
-    // First, and it stays first: `createBackdrop` parks itself at BG_Z, well behind the
-    // tile batch at GAMEPLAY_Z, so depth — not draw order — is what keeps it in the back.
+    // `createBackdrop` parks itself at BG_Z, far behind the tile batch at GAMEPLAY_Z, so
+    // depth is what keeps it in the back — its place in this list carries no meaning.
     backdrop,
     directional,
     hemisphere,
@@ -895,6 +900,11 @@ export function startGame(
     },
     render() {
       followPlayer(camera, player, grid)
+      // Rides the camera, so the ridge never runs out sideways: the hills span roughly ±15.5
+      // around the group, wider than the frustum but far narrower than a level. Pinning means
+      // zero parallax — a distant sky barely shifts anyway, and the parallax pass that
+      // src/render/backdrop.ts anticipates is what turns this constant into a factor.
+      backdrop.position.x = camera.position.x
       debugVelocity.vx = player.body.velocity.x
       debugVelocity.vy = player.body.velocity.y
       overlay.setBodies(debugBodies)
@@ -946,8 +956,9 @@ export function startGame(
         boss.mesh.material.dispose()
       }
       for (const flag of flagArt) flag.dispose()
-      // Eight meshes over two geometries and three materials, so the sets are what keep
-      // this from disposing the shared ones over and over.
+      // The group shares one geometry across every hill and one material across every cloud,
+      // so the sets are what keep this from disposing the shared ones over and over. The
+      // counts themselves deliberately stay in src/render/backdrop.ts.
       const geometries = new Set<THREE.BufferGeometry>()
       const materials = new Set<THREE.Material>()
       backdrop.traverse((object) => {
