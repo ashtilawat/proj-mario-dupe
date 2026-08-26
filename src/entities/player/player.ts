@@ -99,6 +99,30 @@ const BRIM_COLOR = 0xb92d21
 const HEAD_COLOR = 0xe8c547
 const OVERALLS_COLOR = 0x2e5bbf
 const SHOES_COLOR = 0x4a2f1b
+/** The lantern's lit paper: the HUD's cream stock, pushed warmer by the flame inside it.
+ * Bright in red AND green, which is what keeps it clear of the hat's red. */
+const LANTERN_PAPER_COLOR = 0xf4e2a8
+/** The bail Pip carries it by: the same warm family several stops down, so it reads as a
+ * separate object against the paper rather than glowing with it. Lighter than the shoes,
+ * which stay the darkest thing on the character. */
+const LANTERN_HANDLE_COLOR = 0x6f4a25
+
+/**
+ * How far the paper body reaches towards the camera — deeper than the 0.4 overalls it hangs
+ * in front of, and deliberately so.
+ *
+ * The camera is orthographic and dead-on +Z, so the screen is the XY plane and the depth
+ * test decides which of two overlapping boxes a player actually sees. The lantern has to
+ * overlap the hip in X to read as carried rather than as a tile floating alongside, and at
+ * the 0.16 depth its own proportions suggest, that overlap is the half of the lantern that
+ * never gets drawn: authored width is not visible width. Reaching past the overalls buys
+ * back the whole 0.15. It is a slab from the side, but no more of one than the 0.44 shoes
+ * or the 0.5 brim, and the turn is the only view that ever shows it.
+ *
+ * The bail cannot play the same trick — a 0.44-deep "thin bail" would swing through the yaw
+ * as a plank — so it stays 0.05 and clears the overalls' front edge in X instead.
+ */
+const LANTERN_DEPTH = 0.44
 
 /**
  * The art's own silhouette bounds, in tiles. Deliberately NOT the PLAYER_WIDTH/PLAYER_HEIGHT
@@ -142,6 +166,15 @@ interface PlayerPart {
  * nothing — giving the character a front is what makes the turn visible.
  *
  * Neighbours overlap in Y by ~0.02 so no join can open a seam or z-fight.
+ *
+ * The T-058 lantern breaks that stack rather than extending it, so it is listed after the
+ * body instead of in bottom-to-top order: it is a prop hung off the front of the hip, a
+ * paper body under a thin bail that rises to where a hand would be. It is the only pair of
+ * parts held clear of the centre line — every body part straddles x = 0 — which is how the
+ * art tests tell prop from body without knowing the palette. It reaches FRONT_X and no
+ * further, so it costs the silhouette nothing: the brim and the toe were already out there,
+ * and the lantern rides the same front the turn reads off, carried around the body on the
+ * yaw instead of vanishing behind it.
  */
 const PLAYER_PARTS: readonly PlayerPart[] = [
   { minX: -0.2, maxX: FRONT_X, minY: -HALF_Y, maxY: -0.59, depth: 0.44, color: SHOES_COLOR },
@@ -149,6 +182,17 @@ const PLAYER_PARTS: readonly PlayerPart[] = [
   { minX: -0.23, maxX: 0.23, minY: -0.07, maxY: 0.35, depth: 0.42, color: HEAD_COLOR },
   { minX: -0.24, maxX: FRONT_X, minY: 0.33, maxY: 0.45, depth: 0.5, color: BRIM_COLOR },
   { minX: -0.21, maxX: 0.21, minY: 0.43, maxY: HALF_Y, depth: 0.4, color: HAT_COLOR },
+  // The lantern, hung off the front of the hip. See LANTERN_DEPTH for why the paper is the
+  // deepest thing on the character and the bail is the shallowest.
+  {
+    minX: 0.2,
+    maxX: FRONT_X,
+    minY: -0.5,
+    maxY: -0.24,
+    depth: LANTERN_DEPTH,
+    color: LANTERN_PAPER_COLOR,
+  },
+  { minX: 0.265, maxX: 0.325, minY: -0.26, maxY: -0.06, depth: 0.05, color: LANTERN_HANDLE_COLOR },
 ]
 
 /** Flat-fill a geometry's vertices so the merged mesh keeps its parts distinguishable. */

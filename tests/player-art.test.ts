@@ -91,6 +91,16 @@ function meshParts(geometry: THREE.BufferGeometry): Part[] {
   return [...byColor.values()].sort((a, b) => b.maxY - a.maxY)
 }
 
+/**
+ * The body stack alone — crown, brim, head, overalls, shoes, topmost first — with the T-058
+ * lantern left out. Pip's lantern is the only thing held clear of the centre line, so a part
+ * that never crosses x = 0 is not body. Selecting by role rather than by index is what lets
+ * the character grow held props without every assertion below shifting one slot along.
+ */
+function bodyParts(geometry: THREE.BufferGeometry): Part[] {
+  return meshParts(geometry).filter((part) => part.minX < 0 && part.maxX > 0)
+}
+
 describe('player character mesh', () => {
   test('is one Mesh with a single Lambert material and no geometry groups', () => {
     const mesh = createPlayerMesh()
@@ -124,7 +134,7 @@ describe('player character mesh', () => {
 
     expect(mesh.geometry).not.toBeInstanceOf(THREE.CapsuleGeometry)
     // Crown, brim, head, overalls, shoes: the capsule had exactly one colour.
-    expect(meshParts(mesh.geometry)).toHaveLength(5)
+    expect(bodyParts(mesh.geometry)).toHaveLength(5)
   })
 
   test('fills its own silhouette bounds, centred on the origin', () => {
@@ -156,7 +166,7 @@ describe('player character mesh', () => {
   })
 
   test('is painted in the character palette, not arbitrary colours', () => {
-    const [crown, brim, head, overalls, shoes] = meshParts(createPlayerMesh().geometry) as [
+    const [crown, brim, head, overalls, shoes] = bodyParts(createPlayerMesh().geometry) as [
       Part,
       Part,
       Part,
@@ -185,7 +195,7 @@ describe('player character mesh', () => {
   })
 
   test('reads as a character: the brim overhangs both the crown and the head', () => {
-    const parts = meshParts(createPlayerMesh().geometry)
+    const parts = bodyParts(createPlayerMesh().geometry)
     const [crown, brim, head] = parts as [Part, Part, Part]
     const shoes = parts[parts.length - 1]!
 
@@ -199,7 +209,10 @@ describe('player character mesh', () => {
   })
 
   test('overlaps at every join, so no seam can open', () => {
-    const parts = meshParts(createPlayerMesh().geometry)
+    // The body stack only. A held prop hangs beside the stack rather than continuing it, so
+    // walking it in the same chain would demand the lantern overlap the shoes.
+    // player-lantern.test.ts checks the lantern's own join instead.
+    const parts = bodyParts(createPlayerMesh().geometry)
 
     for (let i = 0; i < parts.length - 1; i += 1) {
       const upper = parts[i]!
@@ -209,7 +222,7 @@ describe('player character mesh', () => {
   })
 
   test('has a front, so the facing turn is visible', () => {
-    const parts = meshParts(createPlayerMesh().geometry)
+    const parts = bodyParts(createPlayerMesh().geometry)
     const brim = parts[1]!
     const shoes = parts[parts.length - 1]!
 
