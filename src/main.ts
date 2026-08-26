@@ -749,8 +749,19 @@ export function startGame(
   // Space is handled here as well, for the audio-context reason in `onSpaceDown` — the engine
   // still owns it as a movement key, and this listener never touches the input state.
   function onKeydown(event: KeyboardEvent): void {
-    if (event.code === 'Space') {
-      onSpaceDown()
+    // T-046. `code` is the physical key the engine and the jump chirp both read; `key` is
+    // the character, which is all a layout with no Space code — or a synthetic press — ever
+    // sends. The chirp stays on the physical key, because all it does is prime the jump edge
+    // the engine finds on that same key. But BOTH shapes stop here: Space is the jump key
+    // and nothing else, and neither shape may fall through to the card key below.
+    if (event.code === 'Space') onSpaceDown()
+    if (event.code === 'Space' || event.key === ' ') {
+      // A frozen run has no jump for Space to be, so the browser's own default is the only
+      // thing left that can act on the press: scrolling the frame the game sits in, or
+      // firing whatever control holds focus. Either one reads as the card being dismissed
+      // by Space, over a run the game still has frozen behind it. Enter ends a card; this
+      // is what keeps Space from looking like it does.
+      if (title.visible || mode !== 'playing') event.preventDefault()
       return
     }
     if (event.key !== 'Enter') return

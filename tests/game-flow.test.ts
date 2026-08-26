@@ -321,3 +321,104 @@ describe('the flag', () => {
     expect(endCard(container).dataset.mode).toBe('playing')
   })
 })
+
+/**
+ * T-046. Space is the jump key and nothing else: it must never answer an end card. QA saw
+ * Space "dismiss" GAME OVER, and the keydown path here proves it never restarts — what it
+ * did do was leave the event cancelable, so the browser ran its own default for Space
+ * (scrolling the frame, or firing whatever control had focus) over a card the game still
+ * considered up. Both halves are pinned below: inert, AND cancelled.
+ *
+ * `key: ' '` gets its own case because a keyboard layout, a synthetic press or an IME can
+ * deliver a Space with no `code` at all, and that shape must not slip past the guard into
+ * the key-matching below it.
+ */
+function pressSpace(container: HTMLElement, init: KeyboardEventInit): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+  container.dispatchEvent(event)
+  return event
+}
+
+/** The two shapes a Space keydown arrives in. Neither may reach the end cards. */
+const SPACE_KEYS: readonly (readonly [string, KeyboardEventInit])[] = [
+  ['code Space', { key: ' ', code: 'Space' }],
+  ['bare key', { key: ' ' }],
+]
+
+describe('Space on an end card', () => {
+  for (const [shape, init] of SPACE_KEYS) {
+    test(`leaves GAME OVER up — ${shape}`, () => {
+      const { container, game } = start()
+      drainLives(game)
+
+      pressSpace(container, init)
+
+      expect(game.hud.getState().lives).toBe(0)
+      expect(endCard(container).dataset.mode).toBe('gameover')
+      expect(endCard(container).style.display).not.toBe('none')
+      expect(cardText(container)).toBe(GAME_OVER_TEXT)
+    })
+
+    test(`is cancelled on GAME OVER, so the browser cannot act on it — ${shape}`, () => {
+      const { container, game } = start()
+      drainLives(game)
+
+      expect(pressSpace(container, init).defaultPrevented).toBe(true)
+    })
+
+    test(`leaves YOU WIN up — ${shape}`, () => {
+      const { container, game } = start()
+      winTheRun(game)
+
+      pressSpace(container, init)
+
+      expect(endCard(container).dataset.mode).toBe('win')
+      expect(endCard(container).style.display).not.toBe('none')
+      expect(cardText(container)).toBe(WIN_TEXT)
+    })
+
+    test(`is cancelled on YOU WIN — ${shape}`, () => {
+      const { container, game } = start()
+      winTheRun(game)
+
+      expect(pressSpace(container, init).defaultPrevented).toBe(true)
+    })
+
+    test(`is cancelled while the title card is still up — ${shape}`, () => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      started = startGame(
+        container,
+        () => stubRenderer() as unknown as THREE.WebGLRenderer,
+        { width: 800, height: 400 },
+      )
+
+      expect(pressSpace(container, init).defaultPrevented).toBe(true)
+    })
+
+    test(`does not spend the Enter that restarts the run — ${shape}`, () => {
+      const { container, game } = start()
+      drainLives(game)
+      pressSpace(container, init)
+
+      pressEnter(container)
+
+      expect(game.hud.getState().lives).toBe(START_LIVES)
+      expect(endCard(container).dataset.mode).toBe('playing')
+      expect(endCard(container).style.display).toBe('none')
+    })
+  }
+
+  test('still jumps during a live run', () => {
+    const { container, game } = start()
+    // On the ground, at rest: the only thing that can lift it is the jump key.
+    game.loop.tick(1 / 120)
+    const groundY = game.player.body.aabb.y
+
+    pressSpace(container, { key: ' ', code: 'Space' })
+    game.loop.tick(1 / 120)
+
+    expect(game.player.body.velocity.y).toBeGreaterThan(0)
+    expect(game.player.body.aabb.y).toBeGreaterThan(groundY)
+  })
+})
