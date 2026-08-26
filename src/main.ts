@@ -3,7 +3,11 @@ import { createInput, createLoop } from './engine/index.ts'
 import type { Loop } from './engine/index.ts'
 import { createDashInput, createPlayer } from './entities/player/index.ts'
 import type { Player } from './entities/player/index.ts'
+import { createWalker } from './entities/enemies/walker.ts'
+import type { Walker } from './entities/enemies/walker.ts'
 import { decodeTiles, loadLevel } from './levels/index.ts'
+import type { Level } from './levels/index.ts'
+import { TILE_SIZE } from './physics/index.ts'
 import type { TileGrid, TileKind } from './physics/index.ts'
 import { GAMEPLAY_Z, createLights } from './render/index.ts'
 import { createHud } from './ui/index.ts'
@@ -169,10 +173,45 @@ export function createTileMesh(grid: TileGrid): THREE.InstancedMesh {
   return mesh
 }
 
+/** The level entity type the walker factory answers to. */
+export const WALKER_ENTITY = 'walker'
+
+/**
+ * Every walker spawn point in a level, as live enemies. `props` is the level format's
+ * free-form record, so `dir` is matched against -1 explicitly; anything else faces +X.
+ */
+export function createWalkers(level: Level): Walker[] {
+  return level.entities
+    .filter((entity) => entity.type === WALKER_ENTITY)
+    .map((entity, index) =>
+      createWalker({
+        x: entity.at[0],
+        y: entity.at[1],
+        dir: entity.props?.dir === -1 ? -1 : 1,
+        id: index,
+      }),
+    )
+}
+
+/**
+ * One parent for every walker mesh. Walker art is authored in world units (TILE_SIZE per
+ * tile) while this game draws one world unit per tile, so the whole enemy layer is scaled
+ * down here instead of reaching into walker.ts. A plain Group, so the tile batch stays the
+ * scene's only InstancedMesh.
+ */
+export function createWalkerLayer(walkers: Walker[]): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'walkers'
+  group.scale.setScalar(1 / TILE_SIZE)
+  for (const walker of walkers) group.add(walker.mesh)
+  return group
+}
+
 export interface Game {
   app: App
   scene: THREE.Scene
   player: Player
+  walkers: Walker[]
   hud: Hud
   loop: Loop
   grid: TileGrid
@@ -201,7 +240,9 @@ export function startGame(
   const tiles = createTileMesh(grid)
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
-  scene.add(directional, hemisphere, tiles, player.mesh, overlay.group)
+  const walkers = createWalkers(level)
+  const walkerLayer = createWalkerLayer(walkers)
+  scene.add(directional, hemisphere, tiles, player.mesh, walkerLayer, overlay.group)
 
   const hud = createHud()
   hud.mount(container)
@@ -245,6 +286,7 @@ export function startGame(
     app,
     scene,
     player,
+    walkers,
     hud,
     loop,
     grid,
@@ -258,6 +300,11 @@ export function startGame(
       tiles.geometry.dispose()
       ;(tiles.material as THREE.Material).dispose()
       tiles.removeFromParent()
+      for (const walker of walkers) {
+        walker.mesh.geometry.dispose()
+        walker.mesh.material.dispose()
+      }
+      walkerLayer.removeFromParent()
       app.dispose()
     },
   }

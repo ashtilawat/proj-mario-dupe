@@ -1,0 +1,87 @@
+import { afterEach, describe, expect, test } from 'vitest'
+import * as THREE from 'three'
+import { START_LEVEL, startGame, type Game } from '../src/main'
+import { loadLevel } from '../src/levels/index.ts'
+import { TILE_SIZE } from '../src/physics/index.ts'
+
+/** jsdom ships no WebGL; every test drives the real wiring through this stub. */
+function stubRenderer() {
+  return {
+    domElement: document.createElement('canvas'),
+    setSize() {},
+    setPixelRatio() {},
+    render() {},
+    dispose() {},
+  }
+}
+
+let started: Game | null = null
+
+function start(size = { width: 800, height: 400 }) {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const game = startGame(container, () => stubRenderer() as unknown as THREE.WebGLRenderer, size)
+  started = game
+  return { container, game }
+}
+
+afterEach(() => {
+  started?.dispose()
+  started = null
+  document.body.replaceChildren()
+})
+
+describe('walker spawning', () => {
+  test('spawns one walker from the 1-1 spawn point, facing the way props say', () => {
+    const { game } = start()
+
+    expect(game.walkers).toHaveLength(1)
+    const walker = game.walkers[0]!
+    expect(walker.aabb.x).toBeCloseTo(16, 5)
+    expect(walker.aabb.y).toBeCloseTo(1, 5)
+    expect(walker.dir).toBe(-1)
+    expect(walker.alive).toBe(true)
+  })
+
+  test('ignores level entities that are not walkers', () => {
+    const { game } = start()
+    const level = loadLevel(START_LEVEL)
+
+    // 1-1 carries a `flag` entity at [22, 1] alongside the walker; only the walker
+    // may become an enemy.
+    expect(level.entities.length).toBeGreaterThan(1)
+    expect(level.entities.some((entity) => entity.type === 'flag')).toBe(true)
+    expect(game.walkers).toHaveLength(1)
+    expect(game.walkers.some((walker) => walker.aabb.x === 22)).toBe(false)
+  })
+
+  test('adds the walker meshes to the scene under a tile-scaled layer', () => {
+    const { game } = start()
+    const layer = game.scene.getObjectByName('walkers')
+
+    expect(layer).toBeInstanceOf(THREE.Group)
+    expect(game.scene.children).toContain(layer)
+    expect(layer!.scale.x).toBeCloseTo(1 / TILE_SIZE, 10)
+    expect(layer!.children).toContain(game.walkers[0]!.mesh)
+  })
+
+  test('renders the walker on its hitbox, in tile units', () => {
+    const { game } = start()
+    game.scene.updateMatrixWorld(true)
+
+    // Hitbox is [16, 17] x [1, 2] in tiles, so the box centre is (16.5, 1.5).
+    const position = game.walkers[0]!.mesh.getWorldPosition(new THREE.Vector3())
+    expect(position.x).toBeCloseTo(16.5, 5)
+    expect(position.y).toBeCloseTo(1.5, 5)
+    expect(position.z).toBeCloseTo(0, 5)
+  })
+
+  test('keeps the tile batch the only instanced mesh in the scene', () => {
+    const { game } = start()
+
+    const instanced = game.scene.children.filter(
+      (child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh,
+    )
+    expect(instanced).toHaveLength(1)
+  })
+})
