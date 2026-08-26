@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { COIN_COLOR, COIN_HEIGHT, COIN_WIDTH, createCoin } from './coin.ts'
+import * as THREE from 'three'
+import { COIN_COLOR, COIN_HEIGHT, COIN_SPIN_SPEED, COIN_WIDTH, createCoin } from './coin.ts'
 import { overlaps, TILE_SIZE } from '../../physics/index.ts'
 import type { Aabb } from '../../physics/index.ts'
 
@@ -97,5 +98,89 @@ describe('collect', () => {
     }
     expect(coin.collected).toBe(false)
     expect(coin.mesh.visible).toBe(true)
+  })
+})
+
+/** One full turn, in radians. */
+const TWO_PI = Math.PI * 2
+
+describe('coin spin', () => {
+  test('spins one full revolution per second', () => {
+    expect(COIN_SPIN_SPEED).toBeCloseTo(TWO_PI, 10)
+  })
+
+  test('starts unrotated', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    expect(coin.mesh.rotation.y).toBe(0)
+  })
+
+  test('advances the angle by SPEED * dt', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    coin.step(0.25)
+    expect(coin.mesh.rotation.y).toBeCloseTo(COIN_SPIN_SPEED * 0.25, 10)
+  })
+
+  test('accumulates across steps', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    coin.step(0.1)
+    coin.step(0.1)
+    expect(coin.mesh.rotation.y).toBeCloseTo(COIN_SPIN_SPEED * 0.2, 10)
+  })
+
+  test('spins about Y only, so the disc never tumbles', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    for (let frame = 0; frame < 30; frame += 1) coin.step(1 / 60)
+    expect(coin.mesh.rotation.x).toBe(0)
+    expect(coin.mesh.rotation.z).toBe(0)
+  })
+
+  test('wraps, so the angle stays inside [0, 2pi)', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    for (let frame = 0; frame < 600; frame += 1) {
+      coin.step(1 / 60)
+      expect(coin.mesh.rotation.y).toBeGreaterThanOrEqual(0)
+      expect(coin.mesh.rotation.y).toBeLessThan(TWO_PI)
+    }
+  })
+
+  test('is double-sided, so the disc does not vanish past a quarter turn', () => {
+    expect(createCoin({ x: 0, y: 0 }).mesh.material.side).toBe(THREE.DoubleSide)
+  })
+
+  test('leaves the hitbox and the mesh position alone', () => {
+    const coin = createCoin({ x: 5, y: 3 })
+    const aabb = { ...coin.aabb }
+    const position = coin.mesh.position.clone()
+    for (let frame = 0; frame < 600; frame += 1) coin.step(1 / 60)
+    expect(coin.aabb).toEqual(aabb)
+    expect(coin.mesh.position.equals(position)).toBe(true)
+    // The overlap answers a spinning coin gives must be the ones it gave at rest.
+    expect(overlaps(PLAYER_ON_COIN, coin.aabb)).toBe(true)
+    expect(overlaps(PLAYER_CLEAR, coin.aabb)).toBe(false)
+  })
+
+  test('freezes once collected', () => {
+    const coin = createCoin({ x: 0, y: 0 })
+    coin.step(0.1)
+    const frozen = coin.mesh.rotation.y
+    coin.collect()
+    for (let frame = 0; frame < 10; frame += 1) coin.step(0.1)
+    expect(coin.mesh.rotation.y).toBe(frozen)
+  })
+
+  test('spinning neither collects the coin nor hides it', () => {
+    const coin = createCoin({ x: 5, y: 3 })
+    for (let frame = 0; frame < 60; frame += 1) coin.step(1 / 60)
+    expect(coin.collected).toBe(false)
+    expect(coin.mesh.visible).toBe(true)
+  })
+
+  test('collect stays idempotent after a long spin', () => {
+    const coin = createCoin({ x: 5, y: 3 })
+    for (let frame = 0; frame < 60; frame += 1) coin.step(1 / 60)
+    expect(coin.collect()).toBe(true)
+    expect(coin.collect()).toBe(false)
+    expect(coin.collected).toBe(true)
+    expect(coin.mesh.visible).toBe(false)
   })
 })

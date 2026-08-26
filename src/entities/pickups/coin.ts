@@ -2,7 +2,8 @@
 //
 // Units mirror the walker (src/entities/enemies/walker.ts): the hitbox is a 2D AABB in TILE
 // space (1 tile = 1.0, bottom-left origin, Y up), while the art lives in WORLD units, where
-// TILE_SIZE world units make one tile. Coins never move, so there is no step().
+// TILE_SIZE world units make one tile. A coin's hitbox never moves; only the art does, so
+// step() (T-040) is purely cosmetic and the AABB is set once, in the constructor.
 
 import * as THREE from 'three'
 import { TILE_SIZE } from '../../physics/index.ts'
@@ -28,6 +29,12 @@ const COIN_SEGMENTS = 24
 /** Gameplay entities sit on the Z = 0 plane. */
 const GAMEPLAY_Z = 0
 
+/** One whole revolution, in radians — the wrap point for the spin angle. */
+const FULL_TURN = Math.PI * 2
+
+/** T-040 — idle spin rate in radians/s: exactly one revolution per second. */
+export const COIN_SPIN_SPEED = FULL_TURN
+
 export class Coin {
   readonly id: number
   readonly aabb: Aabb
@@ -39,15 +46,32 @@ export class Coin {
     this.aabb = { x: spawn.x, y: spawn.y, w: COIN_WIDTH, h: COIN_HEIGHT }
     this.mesh = new THREE.Mesh(
       new THREE.CircleGeometry((COIN_WIDTH * TILE_SIZE) / 2, COIN_SEGMENTS),
-      new THREE.MeshLambertMaterial({ color: COIN_COLOR }),
+      // DoubleSide because the disc is flat and spins: past a quarter turn its front face
+      // points away from the camera, and a single-sided coin would blink out for half of
+      // every revolution.
+      new THREE.MeshLambertMaterial({ color: COIN_COLOR, side: THREE.DoubleSide }),
     )
-    // Coins never move, so this is the only sync the mesh ever needs. Lambert, like the
-    // walker, so it responds to the scene's directional and hemisphere lights.
+    // The hitbox never moves, so this is the only position sync the mesh ever needs; step()
+    // touches rotation alone. Lambert, like the walker, so it responds to the scene's
+    // directional and hemisphere lights.
     this.mesh.position.set(
       (this.aabb.x + this.aabb.w / 2) * TILE_SIZE,
       (this.aabb.y + this.aabb.h / 2) * TILE_SIZE,
       GAMEPLAY_Z,
     )
+  }
+
+  /**
+   * Advance the idle spin. The disc sits in XY facing +Z, so turning it about Y spins it on
+   * its vertical diameter — the classic standing-coin spin, edge-on twice a revolution.
+   *
+   * Cosmetic only: this writes rotation.y and nothing else, so a spinning coin's hitbox and
+   * overlap answers are identical to a still one's. A collected coin is already hidden, so
+   * it stops where it stopped rather than spinning on invisibly.
+   */
+  step(dt: number): void {
+    if (this.collected) return
+    this.mesh.rotation.y = (this.mesh.rotation.y + COIN_SPIN_SPEED * dt) % FULL_TURN
   }
 
   /**
