@@ -273,8 +273,10 @@ export function createPlayer(options: PlayerOptions): Player {
     // sweep for the same reason.
     const speed = Math.abs(velocity.x)
     const bobbing = player.grounded && speed >= BOB_MIN_SPEED
-    if (player.grounded) bobPhase += ((WALK_MAX * dt) / BOB_STRIDE) * 2 * Math.PI
-    const targetAmp = bobbing ? BOB_AMPLITUDE : 0
+    // Advanced by DISTANCE travelled, not by time: a half-speed walk bobs at half the rate
+    // instead of skating through a full-speed cycle with shorter steps.
+    if (player.grounded) bobPhase += ((speed * dt) / BOB_STRIDE) * 2 * Math.PI
+    const targetAmp = bobbing ? BOB_AMPLITUDE * Math.min(1, speed / WALK_MAX) : 0
     // moveToward snaps to its target, exactly as the squash recovery below does, so an idle
     // or airborne mesh settles on a bit-exact zero offset rather than an asymptotic crumb.
     bobAmp = moveToward(bobAmp, targetAmp, BOB_FADE_RATE * dt)

@@ -236,3 +236,84 @@ describe('the bob is active only when grounded and walking', () => {
     }
   })
 })
+
+describe('the bob is phased on distance, not on the clock', () => {
+  /** Walk until `distance` tiles are covered, sampling the lift every frame. */
+  function liftsOverDistance(distance: number, moveX: number): number[] {
+    const player = onGround()
+    const held = input({ moveX, right: moveX > 0, left: moveX < 0 })
+    const startX = player.body.aabb.x
+    const lifts: number[] = []
+
+    for (let i = 0; i < 4000; i += 1) {
+      player.step(FIXED_DT, held)
+      lifts.push(bobLift(player))
+      if (Math.abs(player.body.aabb.x - startX) >= distance) return lifts
+    }
+    throw new Error('player never covered the distance')
+  }
+
+  /** Strict local maxima — one per bob cycle. */
+  function countPeaks(lifts: number[]): number {
+    let peaks = 0
+    for (let i = 1; i < lifts.length - 1; i += 1) {
+      if (lifts[i]! > lifts[i - 1]! && lifts[i]! >= lifts[i + 1]!) peaks += 1
+    }
+    return peaks
+  }
+
+  test('the same ground covered is the same number of steps, whatever the speed', () => {
+    // Three strides' worth of ground. A clock-phased bob would give the half-speed walk
+    // twice as many cycles, because it spends twice as long covering the same tiles.
+    const distance = 3 * BOB_STRIDE
+    const full = countPeaks(liftsOverDistance(distance, 1))
+    const half = countPeaks(liftsOverDistance(distance, 0.5))
+
+    expect(full).toBe(3)
+    expect(half).toBe(full)
+  })
+
+  test('a half-speed walk takes about twice as long to cover the same stride', () => {
+    // Guards the premise of the test above: the two runs really are different in time.
+    const distance = 3 * BOB_STRIDE
+    const fullFrames = liftsOverDistance(distance, 1).length
+    const halfFrames = liftsOverDistance(distance, 0.5).length
+
+    expect(halfFrames / fullFrames).toBeGreaterThan(1.6)
+  })
+
+  test('a slower walk bobs lower', () => {
+    const peakAt = (moveX: number): number => {
+      const player = onGround()
+      const held = input({ moveX, right: true })
+      let peak = 0
+      for (let i = 0; i < 300; i += 1) {
+        player.step(FIXED_DT, held)
+        peak = Math.max(peak, bobLift(player))
+      }
+      return peak
+    }
+
+    const full = peakAt(1)
+    const half = peakAt(0.5)
+
+    expect(full).toBeCloseTo(BOB_AMPLITUDE, 3)
+    expect(half).toBeLessThan(full * 0.75)
+    expect(half).toBeGreaterThan(0)
+  })
+
+  test('dashing does not lift the character any higher than a full walk', () => {
+    // DASH_MAX is 1.6x WALK_MAX; the amplitude is clamped so dash feel stays out of T-042.
+    const player = onGround()
+    const held = input({ moveX: 1, right: true, dash: true })
+    let peak = 0
+
+    for (let i = 0; i < 300; i += 1) {
+      player.step(FIXED_DT, held)
+      peak = Math.max(peak, bobLift(player))
+      expect(bobLift(player)).toBeLessThanOrEqual(BOB_AMPLITUDE)
+    }
+
+    expect(peak).toBeCloseTo(BOB_AMPLITUDE, 2)
+  })
+})
