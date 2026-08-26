@@ -29,7 +29,7 @@ import {
 import { title as storyTitle } from './story/index.ts'
 import { createHud, createTitle } from './ui/index.ts'
 import type { Hud, Title } from './ui/index.ts'
-import { createDebugOverlay } from './debug/index.ts'
+import { createDebugOverlay, parseLevelHash } from './debug/index.ts'
 import type { DebugBody, DebugOverlay } from './debug/index.ts'
 
 /** Vertical size of the orthographic frustum, in world units. */
@@ -133,6 +133,26 @@ export const START_LEVEL = '1-1'
 
 /** Camera height, in tiles. The 10-tile frustum then covers the whole 12-tile level. */
 export const CAMERA_Y = 5
+
+/**
+ * The level a boot or a warp lands on: whatever `#level=<id>` names, when the loader knows
+ * it. A missing, unreadable or unknown id is World 1-1 — no URL a player can type should
+ * be able to hand `applyLevel` an id that throws halfway through swapping the world out.
+ * Probing with `loadLevel` is how that is settled here rather than at the call site.
+ *
+ * Deliberately not consulted by `restart`: the end cards always go back to START_LEVEL, so
+ * a hash-booted run that ends still starts over at 1-1.
+ */
+function hashLevel(): string {
+  const id = parseLevelHash(window.location.hash)
+  if (!id) return START_LEVEL
+  try {
+    loadLevel(id)
+  } catch {
+    return START_LEVEL
+  }
+  return id
+}
 
 /**
  * A {@link TileGrid} over a level's decoded GIDs. Tiled rows run top-down while physics Y
@@ -751,10 +771,21 @@ export function startGame(
     if (event.code === 'Space') spaceHeld = false
   }
 
+  /**
+   * A warp: the address bar changed, so the world follows it. Same rule as the boot below,
+   * which is the point — a link pasted mid-run lands on exactly the level it would have
+   * booted into. The title card is not touched either way: on boot it is still up over the
+   * frozen opening pose, and mid-run it is already down.
+   */
+  function onHashChange(): void {
+    applyLevel(hashLevel())
+  }
+
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
+  window.addEventListener('hashchange', onHashChange)
 
-  applyLevel(START_LEVEL)
+  applyLevel(hashLevel())
 
   const loop = createLoop({
     input,
@@ -931,6 +962,7 @@ export function startGame(
       dash.detach()
       window.removeEventListener('keydown', onKeydown)
       window.removeEventListener('keyup', onKeyup)
+      window.removeEventListener('hashchange', onHashChange)
       overlay.dispose()
       endOverlay.dispose()
       title.unmount()
