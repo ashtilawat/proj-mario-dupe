@@ -2,6 +2,11 @@ import type { Hud, HudState, PowerState } from './types.ts'
 
 const DEFAULT_STATE: HudState = { coins: 0, lives: 3, power: "small" }
 
+/** The HUD's paper stock: a cream card, a darker cream edge, and ink to write with. */
+const PAPER = "#f4ead2"
+const PAPER_EDGE = "#e0d0a8"
+const INK = "#3a2a18"
+
 function padCoins(n: number): string {
   const v = Math.max(0, Math.floor(n))
   return v < 100 ? String(v).padStart(2, "0") : String(v)
@@ -25,9 +30,29 @@ function applyOverlayStyle(el: HTMLElement): void {
   el.style.textShadow = "0 1px 0 #000"
 }
 
+function applyPaperStyle(el: HTMLElement): void {
+  el.style.display = "flex"
+  el.style.gap = "14px"
+  el.style.alignItems = "baseline"
+  el.style.padding = "6px 12px"
+  el.style.background = PAPER
+  el.style.border = "1px solid " + PAPER_EDGE
+  el.style.borderRadius = "4px"
+  el.style.boxShadow = "0 2px 0 rgba(58, 42, 24, 0.18)"
+}
+
+/** Ink on paper: the card lifts its items off the white-on-void overlay treatment. */
+function applyInkStyle(el: HTMLElement): void {
+  el.style.color = INK
+  el.style.textShadow = "none"
+}
+
 function item(label: string, attr: string): { wrap: HTMLElement; value: HTMLElement } {
   const wrap = document.createElement("div")
   wrap.dataset.hudItem = attr
+  wrap.style.display = "flex"
+  wrap.style.gap = "6px"
+  wrap.style.alignItems = "baseline"
   const lab = document.createElement("span")
   lab.dataset.hudLabel = ""
   lab.textContent = label
@@ -55,7 +80,14 @@ export function createHud(initial: Partial<HudState> = {}): Hud {
   const coins = item("COINS", "coins")
   const lives = item("LIVES", "lives")
   const power = item("STATE", "power")
-  root.append(coins.wrap, lives.wrap, power.wrap)
+
+  const paper = document.createElement("div")
+  paper.dataset.hudPaper = ""
+  applyPaperStyle(paper)
+  applyInkStyle(coins.wrap)
+  applyInkStyle(lives.wrap)
+  paper.append(coins.wrap, lives.wrap)
+  root.append(paper, power.wrap)
 
   function render(): void {
     coins.value.textContent = "x " + padCoins(state.coins)
