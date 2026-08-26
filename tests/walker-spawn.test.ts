@@ -104,6 +104,9 @@ describe('walker patrol', () => {
 
     for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
 
+    // Proves the walker both moved (didn't stay parked at spawn x=16) and stayed grounded
+    // while doing so.
+    expect(walker.aabb.x).toBeLessThan(16)
     expect(walker.aabb.y).toBeCloseTo(1, 5)
   })
 
@@ -114,7 +117,10 @@ describe('walker patrol', () => {
     for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
     game.scene.updateMatrixWorld(true)
 
+    // Proves the mesh actually left its spawn position (rather than trivially matching a
+    // stationary hitbox) while still tracking the hitbox centre.
     const position = walker.mesh.getWorldPosition(new THREE.Vector3())
+    expect(position.x).toBeLessThan(16.5)
     expect(position.x).toBeCloseTo(walker.aabb.x + 0.5, 5)
     expect(position.y).toBeCloseTo(walker.aabb.y + 0.5, 5)
   })
