@@ -85,3 +85,37 @@ describe('walker spawning', () => {
     expect(instanced).toHaveLength(1)
   })
 })
+
+describe('walker patrol', () => {
+  test('steps each walker once per fixed sim step', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+
+    // 30 frames at 1/60 is 60 fixed steps = 0.5s. Patrol speed is WALK_MAX / 3 = 2 tiles/s,
+    // and dir is -1, so the walker should have strolled exactly one tile to the left.
+    for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
+
+    expect(walker.aabb.x).toBeCloseTo(15, 5)
+  })
+
+  test('keeps the patrolling walker resting on the floor', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+
+    for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
+
+    expect(walker.aabb.y).toBeCloseTo(1, 5)
+  })
+
+  test('keeps the mesh following the hitbox as it walks', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+
+    for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
+    game.scene.updateMatrixWorld(true)
+
+    const position = walker.mesh.getWorldPosition(new THREE.Vector3())
+    expect(position.x).toBeCloseTo(walker.aabb.x + 0.5, 5)
+    expect(position.y).toBeCloseTo(walker.aabb.y + 0.5, 5)
+  })
+})

@@ -261,6 +261,8 @@ export function startGame(
     simulate(dt, state) {
       player.step(dt, dash.poll(state))
 
+      for (const walker of walkers) walker.step(dt, grid)
+
       // Fell out of the level: nothing below y=0 can ever catch the body, so the fall
       // costs a life and puts the player back on the level spawn at rest.
       const aabb = player.body.aabb
