@@ -70,17 +70,24 @@ describe('falling into a pit', () => {
     expect(game.player.body.velocity.y).toBe(0)
   })
 
+  // x = 20 is past the checkpoint at 12, so this fall respawns at the checkpoint rather
+  // than back at the spawn — the camera has to follow the player wherever they land.
   test('keeps following the respawned player with the camera', () => {
     const { game } = start()
-    const [spawnX] = loadLevel(START_LEVEL).spawn
+    const [checkpointX] = loadLevel(START_LEVEL).checkpoint
 
     game.player.body.aabb.x = 20
     game.player.body.aabb.y = -10
     game.loop.tick(1 / 60)
 
+    expect(game.player.body.aabb.x).toBeCloseTo(checkpointX, 5)
     const halfWidth = (game.app.camera.right - game.app.camera.left) / 2
-    const centerX = spawnX + game.player.body.aabb.w / 2
-    expect(game.app.camera.position.x).toBeCloseTo(Math.max(centerX, halfWidth), 5)
+    const maxX = game.grid.width - halfWidth
+    const centerX = checkpointX + game.player.body.aabb.w / 2
+    expect(game.app.camera.position.x).toBeCloseTo(
+      Math.min(Math.max(centerX, halfWidth), maxX),
+      5,
+    )
   })
 
   test('does not cost a life while the player idles on the floor', () => {

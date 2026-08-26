@@ -8,7 +8,7 @@ import type { Walker } from './entities/enemies/walker.ts'
 import { decodeTiles, loadLevel } from './levels/index.ts'
 import type { Level } from './levels/index.ts'
 import { TILE_SIZE, overlaps } from './physics/index.ts'
-import type { TileGrid, TileKind } from './physics/index.ts'
+import type { Aabb, TileGrid, TileKind } from './physics/index.ts'
 import { GAMEPLAY_Z, SKY_COLOR, createLights, tileColorAt } from './render/index.ts'
 import { createHud } from './ui/index.ts'
 import type { Hud } from './ui/index.ts'
@@ -214,6 +214,100 @@ export function createWalkerLayer(walkers: Walker[]): THREE.Group {
   return group
 }
 
+/** The level entity type the flag reader answers to: a level's exit. */
+export const FLAG_ENTITY = 'flag'
+
+/**
+ * Every flag in a level, as a hitbox. Levels place a flag by its tile the same way they
+ * place a walker, so the AABB follows the walker convention: one tile, anchored on `at`.
+ */
+export function createFlags(level: Level): Aabb[] {
+  return level.entities
+    .filter((entity) => entity.type === FLAG_ENTITY)
+    .map((entity) => ({ x: entity.at[0], y: entity.at[1], w: 1, h: 1 }))
+}
+
+/**
+ * Where each level's flag leads. A level with no entry — the castle at the end of World 1,
+ * or anything the level loader does not know yet — finishes the run instead.
+ */
+export const NEXT_LEVEL: Record<string, string> = {
+  '1-1': '1-2',
+  '1-2': '1-3',
+  '1-3': '1-4',
+  '1-4': '1-5',
+  '1-5': '1-6',
+  '1-6': '1-castle',
+}
+
+/** Lives a run starts with, and what an Enter restart puts back on the HUD. */
+export const START_LIVES = 3
+
+/** End-card copy. A run only ever ends one of two ways. */
+export const GAME_OVER_TEXT = 'GAME OVER'
+export const WIN_TEXT = 'YOU WIN'
+
+/** The card sits above the HUD, which owns z-index 10. */
+export const END_OVERLAY_Z_INDEX = 20
+
+/** What the run is doing. Anything but `playing` freezes the simulation. */
+type RunMode = 'playing' | 'gameover' | 'win'
+
+interface EndOverlay {
+  readonly element: HTMLElement
+  show(mode: Exclude<RunMode, 'playing'>, text: string): void
+  hide(): void
+  dispose(): void
+}
+
+/**
+ * The GAME OVER / YOU WIN card. Local DOM on purpose: `src/ui` owns the persistent HUD,
+ * while this is one game mode's end screen. One node with two texts rather than two nodes,
+ * and it stays mounted while hidden so the card is queryable at any point in a run.
+ */
+function createEndOverlay(): EndOverlay {
+  const root = document.createElement('div')
+  root.dataset.gameOverlay = ''
+  root.dataset.mode = 'playing'
+  root.setAttribute('role', 'status')
+  root.setAttribute('aria-live', 'polite')
+  root.style.position = 'absolute'
+  root.style.inset = '0'
+  root.style.zIndex = String(END_OVERLAY_Z_INDEX)
+  root.style.pointerEvents = 'none'
+  root.style.display = 'none'
+  root.style.alignItems = 'center'
+  root.style.justifyContent = 'center'
+  root.style.background = 'rgba(0, 0, 0, 0.55)'
+  root.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace'
+  root.style.fontSize = '40px'
+  root.style.fontWeight = '700'
+  root.style.letterSpacing = '0.12em'
+  root.style.color = '#fff'
+  root.style.textShadow = '0 2px 0 #000'
+
+  const label = document.createElement('span')
+  label.dataset.gameOverlayText = ''
+  root.append(label)
+
+  return {
+    element: root,
+    show(mode, text) {
+      label.textContent = text
+      root.dataset.mode = mode
+      root.style.display = 'flex'
+    },
+    hide() {
+      label.textContent = ''
+      root.dataset.mode = 'playing'
+      root.style.display = 'none'
+    },
+    dispose() {
+      root.remove()
+    },
+  }
+}
+
 export interface Game {
   app: App
   scene: THREE.Scene
@@ -239,20 +333,55 @@ export function startGame(
   const app = boot(container, createRenderer, size)
   const { scene, camera } = app
 
-  const grid = createTileGridFromLevel(START_LEVEL)
-  const level = loadLevel(START_LEVEL)
-  const [spawnX, spawnY] = level.spawn
+  // Everything a level owns is replaced wholesale by `applyLevel`. The player is not:
+  // `createPlayer` captures its grid once and there is no setter, so what it collides
+  // against is a stable proxy over whichever level is loaded. That is what lets a flag
+  // swap the world out from under a running player without rebuilding them.
+  let currentId = START_LEVEL
+  let level = loadLevel(START_LEVEL)
+  let tileGrid = createTileGridFromLevel(START_LEVEL)
+  let tiles: THREE.InstancedMesh | undefined
+  let flags: Aabb[] = []
+  let spawnX = level.spawn[0]
+  let spawnY = level.spawn[1]
+  let checkpointX = level.checkpoint[0]
+  let checkpointY = level.checkpoint[1]
+  /**
+   * Latched by walking past the checkpoint: from there on a pit fall costs a life but not
+   * the ground already covered. Every level load clears it, so a fresh 1-1 — booted or
+   * restarted — always sends the player back to the spawn.
+   */
+  let latched = false
+
+  const grid: TileGrid = {
+    get width() {
+      return tileGrid.width
+    },
+    get height() {
+      return tileGrid.height
+    },
+    get tileSize() {
+      return tileGrid.tileSize
+    },
+    getTile(tx, ty) {
+      return tileGrid.getTile(tx, ty)
+    },
+  }
 
   const { directional, hemisphere } = createLights()
-  const tiles = createTileMesh(grid)
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
-  const walkers = createWalkers(level)
+  // Filled by `applyLevel`, never reassigned: this array is the one handed out on Game.
+  const walkers: Walker[] = []
   const walkerLayer = createWalkerLayer(walkers)
-  scene.add(directional, hemisphere, tiles, player.mesh, walkerLayer, overlay.group)
+  scene.add(directional, hemisphere, player.mesh, walkerLayer, overlay.group)
 
   const hud = createHud()
   hud.mount(container)
+
+  // After the HUD, which is what gives a static container its `position: relative`.
+  const endOverlay = createEndOverlay()
+  container.appendChild(endOverlay.element)
 
   const input = createInput()
   const dash = createDashInput()
@@ -271,9 +400,111 @@ export function startGame(
   const HIT_IFRAMES_S = 1
   let invuln = 0
 
+  let mode: RunMode = 'playing'
+
+  /**
+   * Swaps the whole world over to `id`: tiles, walkers, flags, spawn and checkpoint, with
+   * the player put down on the new spawn at rest. Throws for a level the loader does not
+   * know — `loadLevel` runs first, so a failed swap leaves the current level untouched.
+   */
+  function applyLevel(id: string): void {
+    const next = loadLevel(id)
+    currentId = id
+    level = next
+    tileGrid = createTileGridFromLevel(id)
+
+    if (tiles) {
+      tiles.geometry.dispose()
+      ;(tiles.material as THREE.Material).dispose()
+      // Also releases the instanceMatrix and instanceColor buffers: three drops those from
+      // its attribute cache on the InstancedMesh dispose event, not on the material's.
+      tiles.dispose()
+      tiles.removeFromParent()
+    }
+    tiles = createTileMesh(grid)
+    scene.add(tiles)
+
+    for (const walker of walkers) {
+      walker.mesh.geometry.dispose()
+      walker.mesh.material.dispose()
+      walker.mesh.removeFromParent()
+    }
+    // Spliced rather than reassigned: `walkers` is the array on Game, and the simulation
+    // and its callers hold that same reference. Fresh walkers are also the level reset —
+    // a stomped walker comes back alive, on its spawn, facing the way the level says.
+    walkers.splice(0, walkers.length, ...createWalkers(level))
+    for (const walker of walkers) walkerLayer.add(walker.mesh)
+
+    flags = createFlags(level)
+    spawnX = level.spawn[0]
+    spawnY = level.spawn[1]
+    checkpointX = level.checkpoint[0]
+    checkpointY = level.checkpoint[1]
+    latched = false
+
+    player.body.aabb.x = spawnX
+    player.body.aabb.y = spawnY
+    player.body.velocity.x = 0
+    player.body.velocity.y = 0
+  }
+
+  /** Freezes the run and raises the card that says how it ended. */
+  function endRun(next: Exclude<RunMode, 'playing'>): void {
+    mode = next
+    endOverlay.show(next, next === 'win' ? WIN_TEXT : GAME_OVER_TEXT)
+  }
+
+  /** One life gone. Spending the last one ends the run. */
+  function loseLife(): void {
+    hud.setLives(hud.getState().lives - 1)
+    if (hud.getState().lives === 0) endRun('gameover')
+  }
+
+  /**
+   * Took the flag. The next level in the chain is loaded when there is one and the loader
+   * knows it; otherwise the run is over and won. Only World 1-1 is registered today, so
+   * every flag currently wins the game — 1-2 onwards will fall out of this path for free.
+   */
+  function advance(): void {
+    const nextId = NEXT_LEVEL[currentId]
+    if (nextId === undefined) {
+      endRun('win')
+      return
+    }
+    try {
+      applyLevel(nextId)
+    } catch {
+      endRun('win')
+    }
+  }
+
+  /** Enter on an end card: World 1-1 from the top, whichever level the run ended on. */
+  function restart(): void {
+    hud.setLives(START_LIVES)
+    invuln = 0
+    applyLevel(START_LEVEL)
+    endOverlay.hide()
+    mode = 'playing'
+  }
+
+  // The engine's InputState has no Enter — it is a menu key, not a movement one — so the
+  // card listens for itself. Inert while playing: only a raised card answers to it.
+  function onKeydown(event: KeyboardEvent): void {
+    if (mode === 'playing') return
+    if (event.key !== 'Enter') return
+    restart()
+  }
+  window.addEventListener('keydown', onKeydown)
+
+  applyLevel(START_LEVEL)
+
   const loop = createLoop({
     input,
     simulate(dt, state) {
+      // An end card is up, so the world stops where it stood: no stepping, no combat, no
+      // pit, no flag. `render` keeps running, and draws that frozen frame under the card.
+      if (mode !== 'playing') return
+
       // tryStomp judges the stomper by where their feet were and which way they were moving
       // BEFORE this step, and nothing on the player records either — so capture both here.
       // Reading the velocity afterwards is wrong: a landing zeroes vy inside moveAndCollide,
@@ -287,6 +518,9 @@ export function startGame(
       const prevBottom = player.body.aabb.y
       const prevVy = player.body.velocity.y
       player.step(dt, dash.poll(state))
+
+      // Passing the checkpoint is one-way for the rest of the level.
+      if (player.body.aabb.x >= checkpointX) latched = true
 
       for (const walker of walkers) walker.step(dt, grid)
 
@@ -304,21 +538,33 @@ export function startGame(
         }
         if (!walker.alive || invuln > 0) continue
         if (!overlaps(player.body.aabb, walker.aabb)) continue
-        hud.setLives(hud.getState().lives - 1)
+        loseLife()
         invuln = HIT_IFRAMES_S
       }
 
       invuln = Math.max(0, invuln - dt)
 
       // Fell out of the level: nothing below y=0 can ever catch the body, so the fall
-      // costs a life and puts the player back on the level spawn at rest.
+      // costs a life and puts the player back at rest on the checkpoint if they reached
+      // it, on the level spawn if they did not. The body moves BEFORE the life is billed:
+      // the last life freezes the game on the spot, and that frozen frame should show the
+      // respawn point rather than the void the player fell into.
       const aabb = player.body.aabb
       if (aabb.y + aabb.h < 0) {
-        hud.setLives(hud.getState().lives - 1)
-        aabb.x = spawnX
-        aabb.y = spawnY
+        aabb.x = latched ? checkpointX : spawnX
+        aabb.y = latched ? checkpointY : spawnY
         player.body.velocity.x = 0
         player.body.velocity.y = 0
+        loseLife()
+      }
+
+      // The level exit. No "already touched" latch is needed: taking a flag either ends the
+      // run or moves the player onto the next level's spawn, so the overlap cannot re-fire.
+      if (mode !== 'playing') return
+      for (const flag of flags) {
+        if (!overlaps(aabb, flag)) continue
+        advance()
+        break
       }
     },
     render() {
@@ -344,14 +590,18 @@ export function startGame(
       loop.stop()
       input.detach()
       dash.detach()
+      window.removeEventListener('keydown', onKeydown)
       overlay.dispose()
+      endOverlay.dispose()
       hud.unmount()
-      tiles.geometry.dispose()
-      ;(tiles.material as THREE.Material).dispose()
-      // Also releases the instanceMatrix and instanceColor buffers: three drops those from
-      // its attribute cache on the InstancedMesh dispose event, not on the material's.
-      tiles.dispose()
-      tiles.removeFromParent()
+      if (tiles) {
+        tiles.geometry.dispose()
+        ;(tiles.material as THREE.Material).dispose()
+        // Also releases the instanceMatrix and instanceColor buffers: three drops those
+        // from its attribute cache on the InstancedMesh dispose event, not the material's.
+        tiles.dispose()
+        tiles.removeFromParent()
+      }
       for (const walker of walkers) {
         walker.mesh.geometry.dispose()
         walker.mesh.material.dispose()

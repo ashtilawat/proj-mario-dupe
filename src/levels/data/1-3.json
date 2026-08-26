@@ -1,0 +1,61 @@
+{
+  "id": "1-3",
+  "size": [
+    28,
+    12
+  ],
+  "tiles": "202:0,3:1,8:0,3:1,92:0,12:1,2:0,14:1",
+  "spawn": [
+    1,
+    1
+  ],
+  "checkpoint": [
+    16,
+    1
+  ],
+  "entities": [
+    {
+      "type": "walker",
+      "at": [
+        9,
+        1
+      ],
+      "props": {
+        "dir": -1
+      }
+    },
+    {
+      "type": "walker",
+      "at": [
+        22,
+        1
+      ],
+      "props": {
+        "dir": -1
+      }
+    },
+    {
+      "type": "coin",
+      "at": [
+        7,
+        5
+      ]
+    },
+    {
+      "type": "coin",
+      "at": [
+        18,
+        5
+      ]
+    },
+    {
+      "type": "flag",
+      "at": [
+        26,
+        1
+      ]
+    }
+  ],
+  "regions": [],
+  "theme": "underground"
+}

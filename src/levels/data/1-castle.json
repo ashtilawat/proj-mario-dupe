@@ -1,0 +1,54 @@
+{
+  "id": "1-castle",
+  "size": [
+    18,
+    12
+  ],
+  "tiles": "144:0,1:1,17:0,1:1,15:0,3:1,15:0,20:1",
+  "spawn": [
+    1,
+    1
+  ],
+  "checkpoint": [
+    2,
+    1
+  ],
+  "entities": [
+    {
+      "type": "walker",
+      "at": [
+        5,
+        1
+      ],
+      "props": {
+        "dir": 1
+      }
+    },
+    {
+      "type": "coin",
+      "at": [
+        15,
+        1
+      ]
+    },
+    {
+      "type": "boss",
+      "at": [
+        8,
+        1
+      ],
+      "props": {
+        "dir": 1
+      }
+    },
+    {
+      "type": "flag",
+      "at": [
+        17,
+        3
+      ]
+    }
+  ],
+  "regions": [],
+  "theme": "castle"
+}
