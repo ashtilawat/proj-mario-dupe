@@ -259,9 +259,21 @@ export function startGame(
   const loop = createLoop({
     input,
     simulate(dt, state) {
+      // tryStomp compares the stomper's feet against where they were before this step,
+      // and nothing on the player records that — so capture it here, before stepping.
+      const prevBottom = player.body.aabb.y
       player.step(dt, dash.poll(state))
 
       for (const walker of walkers) walker.step(dt, grid)
+
+      // A stomp is the walker's call: it checks the fall direction and the overlap, then
+      // hands back the bounce to spend. Defeated walkers just stop being drawn.
+      for (const walker of walkers) {
+        const bounce = walker.tryStomp(player.body.aabb, player.body.velocity.y, prevBottom)
+        if (bounce === 0) continue
+        player.body.velocity.y = bounce
+        walker.mesh.visible = false
+      }
 
       // Fell out of the level: nothing below y=0 can ever catch the body, so the fall
       // costs a life and puts the player back on the level spawn at rest.

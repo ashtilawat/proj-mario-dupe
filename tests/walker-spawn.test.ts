@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { START_LEVEL, startGame, type Game } from '../src/main'
 import { loadLevel } from '../src/levels/index.ts'
-import { TILE_SIZE } from '../src/physics/index.ts'
+import { STOMP_BOUNCE, TILE_SIZE } from '../src/physics/index.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -123,5 +123,92 @@ describe('walker patrol', () => {
     expect(position.x).toBeLessThan(16.5)
     expect(position.x).toBeCloseTo(walker.aabb.x + 0.5, 5)
     expect(position.y).toBeCloseTo(walker.aabb.y + 0.5, 5)
+  })
+})
+
+describe('stomping a walker', () => {
+  /** Parks the player directly on top of the 1-1 walker, falling. */
+  function dropPlayerOnWalker(game: Game, vy: number) {
+    const aabb = game.player.body.aabb
+    aabb.x = 16.2
+    aabb.y = 2
+    game.player.body.velocity.x = 0
+    game.player.body.velocity.y = vy
+  }
+
+  test('bounces the player off a stomped walker', () => {
+    const { game } = start()
+    dropPlayerOnWalker(game, -6)
+
+    game.loop.tick(1 / 120)
+
+    expect(game.player.body.velocity.y).toBe(STOMP_BOUNCE)
+  })
+
+  test('defeats the stomped walker in place', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    dropPlayerOnWalker(game, -6)
+
+    game.loop.tick(1 / 120)
+
+    expect(walker.alive).toBe(false)
+    expect(walker.stomped).toBe(true)
+  })
+
+  test('hides the defeated walker', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    dropPlayerOnWalker(game, -6)
+
+    game.loop.tick(1 / 120)
+
+    expect(walker.mesh.visible).toBe(false)
+  })
+
+  test('leaves a defeated walker inert for the rest of the level', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    dropPlayerOnWalker(game, -6)
+    game.loop.tick(1 / 120)
+    const restingX = walker.aabb.x
+
+    for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
+
+    expect(walker.aabb.x).toBeCloseTo(restingX, 5)
+    expect(walker.alive).toBe(false)
+  })
+
+  test('does not stomp a walker the player is rising into', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+    // Overlapping the walker from below, moving up: a stomp must need a downward fall.
+    game.player.body.aabb.x = 16.2
+    game.player.body.aabb.y = 1.5
+    game.player.body.velocity.y = 6
+
+    game.loop.tick(1 / 120)
+
+    expect(walker.alive).toBe(true)
+    expect(game.player.body.velocity.y).not.toBe(STOMP_BOUNCE)
+  })
+
+  test('leaves an untouched walker alone while the player idles', () => {
+    const { game } = start()
+    const walker = game.walkers[0]!
+
+    for (let i = 0; i < 30; i++) game.loop.tick(1 / 60)
+
+    expect(walker.alive).toBe(true)
+    expect(walker.mesh.visible).toBe(true)
+  })
+
+  test('still shows exactly one debug hitbox — walkers stay off the overlay', () => {
+    const { game } = start()
+
+    game.loop.tick(1 / 60)
+
+    expect(game.overlay.group.getObjectByName('debug-hitboxes')?.children.length).toBe(1)
+    expect(game.overlay.group.getObjectByName('debug-velocities')?.children.length).toBe(1)
   })
 })
