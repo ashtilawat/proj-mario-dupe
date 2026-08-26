@@ -1,6 +1,7 @@
 /**
  * Player-facing copy for World 1. Pure data: no DOM, no scene, no listeners.
- * Nothing here is wired into the game yet — that is a later ticket.
+ * `title` and `tagline` are on the live title card; `flagLines` has no consumer
+ * yet, so editing those seven is still inert. Editing the first two is not.
  */
 
 /** The seven World 1 level ids, in play order. */

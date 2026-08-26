@@ -31,7 +31,7 @@ describe('createTitle', () => {
 })
 
 describe('title tagline', () => {
-  test('renders the story tagline, not a copy of it kept in the UI layer', () => {
+  test('renders the story tagline, so the card cannot drift from the copy', () => {
     // Guard the comparison below: it would pass against an empty node if the story
     // module's tagline were ever emptied out.
     expect(storyTagline).not.toBe('')
