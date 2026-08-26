@@ -62,6 +62,9 @@ export function createPlayer(options: PlayerOptions): Player {
   const sweep: SweepResult = { x: 0, y: 0, hitX: false, hitY: false, grounded: false }
 
   let prevJump = false
+  // A launched jump that has not yet spent its one cutoff. Latched per jump rather than read
+  // off a live release edge, so a press buffered and released in mid-air still clips its arc.
+  let cutPending = false
   let targetYaw = FACE_RIGHT
 
   function step(dt: number, input: PlayerInput): void {
@@ -75,8 +78,12 @@ export function createPlayer(options: PlayerOptions): Player {
 
     // 3. Horizontal. Overspeed (a released dash) bleeds off at the friction rate.
     const intent = horizontalIntent(input)
-    const maxSpeed = input.dash ? DASH_MAX : WALK_MAX
-    const accel = player.grounded ? GROUND_ACCEL : AIR_ACCEL
+    const dashing = input.dash
+    const maxSpeed = dashing ? DASH_MAX : WALK_MAX
+    const baseAccel = player.grounded ? GROUND_ACCEL : AIR_ACCEL
+    // Dash ramps in proportion to its higher cap, so it saturates in the same 0.2 s walk does.
+    // Sharing GROUND_ACCEL made a short burst pay out ~1.35x walk instead of the spec's 1.6x.
+    const accel = dashing ? baseAccel * (DASH_MAX / WALK_MAX) : baseAccel
     const friction = player.grounded ? GROUND_FRICTION : AIR_DRAG
     if (intent === 0) {
       velocity.x = moveToward(velocity.x, 0, friction * dt)
@@ -91,9 +98,12 @@ export function createPlayer(options: PlayerOptions): Player {
       // the ground contact the still-open coyote window would hand out a second jump.
       velocity.y = JUMP_VELOCITY
       coyote.timeSinceGrounded = Number.POSITIVE_INFINITY
-    } else if (prevJump && !input.jump && velocity.y > 0) {
-      // 5. Variable jump: releasing while still rising clips the arc, once per jump.
+      cutPending = true
+    } else if (cutPending && !input.jump && velocity.y > 0) {
+      // 5. Variable jump: the first rising frame with the button not held clips the arc, once
+      // per jump. A buffered press arrives already released, so it clips right after launch.
       velocity.y *= JUMP_CUTOFF_FACTOR
+      cutPending = false
     }
 
     // 6. Collide. There is no wall jump and no wall slide: hitting a wall only zeroes vx.
