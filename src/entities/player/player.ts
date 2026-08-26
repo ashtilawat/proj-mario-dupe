@@ -50,11 +50,35 @@ export const LAND_SQUASH_MIN_SPEED = 4.0
 /** Squash shed per second. The deepest squash recovers to identity in 0.125 s. */
 export const SQUASH_RECOVER_RATE = 2.4
 
+// The walk bob is decoration too, and on the same terms as squash and stretch: it moves
+// mesh.position and nothing else. body.aabb never learns about it, so the hitbox a player
+// collides with is identical mid-stride and standing still.
+/** Peak bob lift in tiles at full walk speed — 4% of PLAYER_HEIGHT. */
+export const BOB_AMPLITUDE = 0.06
+/** Tiles of ground travel per full bob cycle. ~3.75 cycles/s at WALK_MAX. */
+export const BOB_STRIDE = 1.6
+/** Below this speed (tiles/s) the residual crawl friction leaves behind does not bob. */
+export const BOB_MIN_SPEED = 0.5
+/** Bob amplitude shed per second. A full amplitude fades out in 0.1 s. */
+export const BOB_FADE_RATE = 0.6
+
 /** Steps `current` towards `target` without overshooting it. */
 function moveToward(current: number, target: number, maxDelta: number): number {
   const delta = target - current
   if (Math.abs(delta) <= maxDelta) return target
   return current + Math.sign(delta) * maxDelta
+}
+
+/**
+ * The walk cycle's vertical curve, in tiles above the resting pose.
+ *
+ * `(1 - cos) / 2` rather than a plain sine for two reasons: it is non-negative, so the
+ * character lifts off its rest pose on each step instead of sinking its shoes through the
+ * floor, and it is exactly 0 at phase 0, so a walk starts from the bottom of the cycle and
+ * a parked bob leaves the mesh precisely on the hitbox centre.
+ */
+export function walkBobOffset(phase: number, amplitude: number): number {
+  return (amplitude * (1 - Math.cos(phase))) / 2
 }
 
 /** Analog stick wins when pushed; otherwise the digital pair decides. */
