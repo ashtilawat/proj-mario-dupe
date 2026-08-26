@@ -1,11 +1,12 @@
 // T-006 — M0 walker enemy: the one and only enemy class for this milestone.
 //
 // Units: the hitbox is a 2D AABB in TILE space (1 tile = 1.0, bottom-left origin, Y up so
-// vy < 0 is falling). The gray-box mesh is purely cosmetic and lives in WORLD units, where
-// TILE_SIZE world units make one tile; the mesh bounds are deliberately decoupled from the
-// hitbox so art can change without touching gameplay.
+// vy < 0 is falling). The mushroom mesh (T-030) is purely cosmetic and lives in WORLD units,
+// where TILE_SIZE world units make one tile; the mesh bounds are deliberately decoupled from
+// the hitbox so art can change without touching gameplay.
 
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
   GRAVITY,
   STOMP_BOUNCE,
@@ -36,8 +37,21 @@ export const WALKER_PATROL_SPEED = WALK_MAX / 3
 export const WALKER_WIDTH = 1
 export const WALKER_HEIGHT = 1
 
-/** Gray-box placeholder art until real assets land. */
-const WALKER_COLOR = 0x9a9a9a
+/** Mushroom colours, applied per vertex so one material draws both parts. */
+const WALKER_CAP_COLOR = 0xc4362f
+const WALKER_STEM_COLOR = 0xf2e2c4
+
+/**
+ * Cap and stem, in tiles, as local offsets from the mesh centre. The two together span
+ * exactly the 1x1x1 tile the gray box used to, so framing does not shift; they overlap by
+ * NECK_OVERLAP at the join so the seam cannot show through or z-fight.
+ */
+const CAP_WIDTH = 1
+const CAP_HEIGHT = 0.45
+const CAP_DEPTH = 1
+const STEM_WIDTH = 0.55
+const STEM_DEPTH = 0.55
+const NECK_OVERLAP = 0.05
 
 /** Gameplay entities sit on the Z = 0 plane. */
 const GAMEPLAY_Z = 0
@@ -45,11 +59,52 @@ const GAMEPLAY_Z = 0
 /** Keeps foot/ledge probes just inside the tile they are meant to sample. */
 const PROBE_EPS = 1e-4
 
+/** Flat-fill a geometry's vertices so the merged mesh keeps its parts distinguishable. */
+function paint(geometry: THREE.BufferGeometry, hex: number): void {
+  const { r, g, b } = new THREE.Color(hex)
+  const count = geometry.getAttribute('position').count
+  const colors = new Float32Array(count * 3)
+  for (let i = 0; i < count; i += 1) colors.set([r, g, b], i * 3)
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+}
+
+/**
+ * A wide cap over a narrower stem, merged into ONE geometry: main.ts disposes
+ * walker.mesh.geometry and walker.mesh.material directly, so child meshes or a material
+ * array would leak. mergeGeometries keeps useGroups false for the same reason — groups
+ * would demand a material array.
+ */
+function createMushroomGeometry(): THREE.BufferGeometry {
+  const stemHeight = WALKER_HEIGHT - CAP_HEIGHT + NECK_OVERLAP
+
+  const cap = new THREE.BoxGeometry(
+    CAP_WIDTH * TILE_SIZE,
+    CAP_HEIGHT * TILE_SIZE,
+    CAP_DEPTH * TILE_SIZE,
+  )
+  cap.translate(0, (WALKER_HEIGHT / 2 - CAP_HEIGHT / 2) * TILE_SIZE, 0)
+  paint(cap, WALKER_CAP_COLOR)
+
+  const stem = new THREE.BoxGeometry(
+    STEM_WIDTH * TILE_SIZE,
+    stemHeight * TILE_SIZE,
+    STEM_DEPTH * TILE_SIZE,
+  )
+  stem.translate(0, (stemHeight / 2 - WALKER_HEIGHT / 2) * TILE_SIZE, 0)
+  paint(stem, WALKER_STEM_COLOR)
+
+  const merged = mergeGeometries([cap, stem])
+  // Only the merged geometry is reachable from main.ts, so free the sources here.
+  cap.dispose()
+  stem.dispose()
+  return merged
+}
+
 export class Walker implements Body {
   readonly id: number
   readonly aabb: Aabb
   readonly velocity: Vec2
-  readonly mesh: THREE.Mesh<THREE.BoxGeometry, THREE.MeshLambertMaterial>
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>
   dir: WalkerFacing
   alive = true
   stomped = false
@@ -65,8 +120,10 @@ export class Walker implements Body {
     this.aabb = { x: spawn.x, y: spawn.y, w: WALKER_WIDTH, h: WALKER_HEIGHT }
     this.velocity = { x: 0, y: 0 }
     this.mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(WALKER_WIDTH * TILE_SIZE, WALKER_HEIGHT * TILE_SIZE, TILE_SIZE),
-      new THREE.MeshLambertMaterial({ color: WALKER_COLOR }),
+      createMushroomGeometry(),
+      // Left white: Lambert multiplies material.color by the vertex colour, so any tint
+      // here would darken both the cap and the stem.
+      new THREE.MeshLambertMaterial({ vertexColors: true }),
     )
     this.syncMesh()
   }

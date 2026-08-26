@@ -213,13 +213,116 @@ describe('stomp', () => {
   })
 })
 
-describe('gray-box mesh', () => {
-  test('is a gray THREE box mesh on the gameplay plane, synced from the hitbox', () => {
+describe('mushroom mesh', () => {
+  /** Vertex indices whose local Y falls in a band, in world units. */
+  function bandIndices(geometry: THREE.BufferGeometry, minY: number, maxY: number): number[] {
+    const position = geometry.getAttribute('position')
+    const indices: number[] = []
+    for (let i = 0; i < position.count; i += 1) {
+      const y = position.getY(i)
+      if (y > minY && y < maxY) indices.push(i)
+    }
+    return indices
+  }
+
+  /** Widest |x| reached by the given vertices — half the part's width. */
+  function halfWidth(geometry: THREE.BufferGeometry, indices: number[]): number {
+    const position = geometry.getAttribute('position')
+    return indices.reduce((widest, i) => Math.max(widest, Math.abs(position.getX(i))), 0)
+  }
+
+  /** The one colour shared by the given vertices; throws if they disagree. */
+  function bandColor(geometry: THREE.BufferGeometry, indices: number[]): [number, number, number] {
+    const color = geometry.getAttribute('color')
+    const seen = new Set(
+      indices.map((i) => `${color.getX(i)},${color.getY(i)},${color.getZ(i)}`),
+    )
+    expect([...seen]).toHaveLength(1)
+    const first = indices[0]!
+    return [color.getX(first), color.getY(first), color.getZ(first)]
+  }
+
+  // The cap spans y 0.05..0.50 and the stem -0.50..0.10 (tiles), overlapping at the neck.
+  // These bands stay well clear of that overlap, so each samples exactly one part.
+  const CAP_BAND: [number, number] = [0.2 * TILE_SIZE, Infinity]
+  const STEM_BAND: [number, number] = [-Infinity, -0.1 * TILE_SIZE]
+
+  // main.ts disposes walker.mesh.geometry and walker.mesh.material directly, so the mesh
+  // must stay one Mesh with one geometry and one non-array material or those calls leak.
+  test('is one Mesh with a single Lambert material and no geometry groups', () => {
     const walker = createWalker({ x: 5, y: 1, dir: 1 })
 
     expect(walker.mesh).toBeInstanceOf(THREE.Mesh)
-    expect(walker.mesh.geometry.type).toBe('BoxGeometry')
+    expect(Array.isArray(walker.mesh.material)).toBe(false)
+    expect(walker.mesh.material).toBeInstanceOf(THREE.MeshLambertMaterial)
     expect(walker.mesh.material).not.toBeInstanceOf(THREE.MeshStandardMaterial)
+    // Two parts are drawn by one material, so vertex colours carry the difference.
+    expect(walker.mesh.material.vertexColors).toBe(true)
+    // Groups would demand a material array, which main.ts's single dispose() cannot free.
+    expect(walker.mesh.geometry.groups).toHaveLength(0)
+  })
+
+  test('carries a per-vertex colour attribute', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+
+    expect(geometry.type).toBe('BufferGeometry')
+    const color = geometry.getAttribute('color')
+    expect(color).toBeDefined()
+    expect(color.itemSize).toBe(3)
+    expect(color.count).toBe(geometry.getAttribute('position').count)
+  })
+
+  test('reads as a mushroom: the cap overhangs a narrower stem', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+
+    const cap = bandIndices(geometry, ...CAP_BAND)
+    const stem = bandIndices(geometry, ...STEM_BAND)
+    expect(cap.length).toBeGreaterThan(0)
+    expect(stem.length).toBeGreaterThan(0)
+
+    expect(halfWidth(geometry, stem)).toBeLessThan(halfWidth(geometry, cap))
+  })
+
+  test('paints exactly two colours: a red cap over a pale stem', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+    const color = geometry.getAttribute('color')
+
+    const distinct = new Set<string>()
+    for (let i = 0; i < color.count; i += 1) {
+      distinct.add(`${color.getX(i)},${color.getY(i)},${color.getZ(i)}`)
+    }
+    expect(distinct.size).toBe(2)
+
+    // Ratios only: THREE converts hex through the working colour space, so absolute
+    // channel values depend on ColorManagement rather than on the art.
+    const [capR, capG, capB] = bandColor(geometry, bandIndices(geometry, ...CAP_BAND))
+    expect(capR).toBeGreaterThan(capG)
+    expect(capR).toBeGreaterThan(capB)
+
+    // The stem is a pale cream, not a second red: far less saturated than the cap.
+    const [stemR, stemG, stemB] = bandColor(geometry, bandIndices(geometry, ...STEM_BAND))
+    expect(stemG).toBeGreaterThan(capG)
+    expect(stemB).toBeGreaterThan(capB)
+    expect(stemG).toBeGreaterThan(0.5 * stemR)
+    expect(stemB).toBeGreaterThan(0.5 * stemR)
+  })
+
+  test('still fills exactly one tile, centred on the origin', () => {
+    const geometry = createWalker({ x: 5, y: 1, dir: 1 }).mesh.geometry
+
+    geometry.computeBoundingBox()
+    const box = geometry.boundingBox!
+    expect(box.min.x).toBeCloseTo(-0.5 * TILE_SIZE, 6)
+    expect(box.max.x).toBeCloseTo(0.5 * TILE_SIZE, 6)
+    expect(box.min.y).toBeCloseTo(-0.5 * TILE_SIZE, 6)
+    expect(box.max.y).toBeCloseTo(0.5 * TILE_SIZE, 6)
+    expect(box.min.z).toBeCloseTo(-0.5 * TILE_SIZE, 6)
+    expect(box.max.z).toBeCloseTo(0.5 * TILE_SIZE, 6)
+  })
+
+  test('sits on the gameplay plane, synced from the hitbox', () => {
+    const walker = createWalker({ x: 5, y: 1, dir: 1 })
+
     expect(walker.mesh.position.z).toBe(0)
 
     // World units: TILE_SIZE per tile, mesh centred on the AABB.
