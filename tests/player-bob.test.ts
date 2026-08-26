@@ -8,6 +8,7 @@ import {
   BOB_MIN_SPEED,
   BOB_STRIDE,
   PLAYER_HEIGHT,
+  PLAYER_WIDTH,
   createPlayer,
   walkBobOffset,
 } from '../src/entities/player/player.ts'
@@ -318,5 +319,130 @@ describe('the bob is phased on distance, not on the clock', () => {
     }
 
     expect(peak).toBeCloseTo(BOB_AMPLITUDE, 2)
+  })
+})
+
+describe('the bob is decoration and nothing else', () => {
+  test('the walk never lifts the hitbox off the floor', () => {
+    // The bob moves the MESH. If it ever leaked into body.aabb the character would climb the
+    // screen as it walked — and bobLift, which subtracts that same centre back off, would read
+    // exactly zero and never notice. This is the test that watches the hitbox itself.
+    const player = onGround()
+    const resting = player.body.aabb.y
+
+    for (let i = 0; i < 600; i += 1) {
+      player.step(FIXED_DT, input({ moveX: 1, right: true }))
+      expect(player.body.aabb.y).toBeCloseTo(resting, 10)
+    }
+  })
+
+  test('never touches the hitbox, through a long walking and jumping run', () => {
+    const player = onGround()
+
+    for (let i = 0; i < 600; i += 1) {
+      player.step(FIXED_DT, input({ moveX: 1, right: true, jump: i % 90 < 12 }))
+
+      expect(player.body.aabb.w).toBe(PLAYER_WIDTH)
+      expect(player.body.aabb.h).toBe(PLAYER_HEIGHT)
+      // X is bit-exact on the centre: the bob is a Y-only offset.
+      expect(player.mesh.position.x).toBe(player.body.aabb.x + PLAYER_WIDTH / 2)
+      const lift = bobLift(player)
+      expect(lift).toBeGreaterThanOrEqual(0)
+      // bobLift subtracts the hitbox centre off an already-rounded sum (mesh.position.y is
+      // IEEE 754 float64), so the recovered lift can sit one ULP above the cap; the upper
+      // bound slack is exactly that.
+      expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE + Number.EPSILON * Math.abs(player.mesh.position.y))
+    }
+  })
+
+  test('the simulation runs identically whether or not there is a mesh to bob', () => {
+    // The strongest independence statement available: swap the real character for a bare
+    // Object3D and the body must trace the SAME numbers, bit for bit. Any feedback from
+    // mesh.position back into the sim would show up here as a divergence.
+    const real = onGround()
+    const stubbed = onGround(2, new THREE.Object3D())
+
+    for (let i = 0; i < 400; i += 1) {
+      const held = input({ moveX: i < 200 ? 1 : -1, right: i < 200, left: i >= 200, jump: i % 70 < 10 })
+      real.step(FIXED_DT, held)
+      stubbed.step(FIXED_DT, held)
+
+      expect(stubbed.body.aabb.x).toBe(real.body.aabb.x)
+      expect(stubbed.body.aabb.y).toBe(real.body.aabb.y)
+      expect(stubbed.body.velocity.x).toBe(real.body.velocity.x)
+      expect(stubbed.body.velocity.y).toBe(real.body.velocity.y)
+      expect(stubbed.grounded).toBe(real.grounded)
+    }
+  })
+
+  test('an injected stub mesh gets bobbed too', () => {
+    const stub = new THREE.Object3D()
+    const player = onGround(2, stub)
+    expect(player.mesh).toBe(stub)
+
+    let peak = 0
+    for (let i = 0; i < 180; i += 1) {
+      player.step(FIXED_DT, input({ moveX: 1, right: true }))
+      peak = Math.max(peak, bobLift(player))
+    }
+
+    expect(peak).toBeGreaterThan(BOB_AMPLITUDE / 2)
+  })
+
+  test('walking never touches the scale, which belongs to T-026', () => {
+    const player = onGround()
+
+    for (let i = 0; i < 240; i += 1) {
+      player.step(FIXED_DT, input({ moveX: 1, right: true }))
+      expect(player.mesh.scale.x).toBe(1)
+      expect(player.mesh.scale.y).toBe(1)
+      expect(player.mesh.scale.z).toBe(1)
+    }
+  })
+
+  test('the landing squash and the bob run at once without either driving the other', () => {
+    const player = onGround()
+    const walking = input({ moveX: 1, right: true })
+    stepFor(player, 40, walking)
+
+    // Jump and hold the walk, so the landing is both squashed and moving.
+    const jumping = input({ moveX: 1, right: true, jump: true })
+    player.step(FIXED_DT, jumping)
+    while (!player.grounded) player.step(FIXED_DT, jumping)
+    expect(player.mesh.scale.y).toBeLessThan(1)
+
+    // Within the squash recovery there is a frame where BOTH channels are live at once.
+    let sawBoth = false
+    for (let i = 0; i < 15; i += 1) {
+      player.step(FIXED_DT, walking)
+      if (player.mesh.scale.y < 1 && bobLift(player) > 0) sawBoth = true
+    }
+    expect(sawBoth).toBe(true)
+
+    // And the squash still recovers to a bit-exact identity while the bob keeps going.
+    stepFor(player, 60, walking)
+    expect(player.mesh.scale.x).toBe(1)
+    expect(player.mesh.scale.y).toBe(1)
+    expect(player.mesh.scale.z).toBe(1)
+
+    let peak = 0
+    for (let i = 0; i < 120; i += 1) {
+      player.step(FIXED_DT, walking)
+      peak = Math.max(peak, bobLift(player))
+      expect(player.mesh.scale.y).toBe(1)
+    }
+    expect(peak).toBeGreaterThan(BOB_AMPLITUDE / 2)
+  })
+
+  test('the T-033 character survives: still one merged, vertex-coloured mesh', () => {
+    const player = onGround()
+    stepFor(player, 60, input({ moveX: 1, right: true }))
+    const mesh = player.mesh as THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>
+
+    expect(mesh).toBeInstanceOf(THREE.Mesh)
+    expect(mesh.children).toHaveLength(0)
+    expect(mesh.geometry).not.toBeInstanceOf(THREE.CapsuleGeometry)
+    expect(mesh.geometry.getAttribute('color')).toBeDefined()
+    expect(mesh.material.vertexColors).toBe(true)
   })
 })
