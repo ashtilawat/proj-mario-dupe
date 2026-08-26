@@ -1,3 +1,5 @@
+import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import {
   AIR_ACCEL,
   AIR_DRAG,
@@ -19,11 +21,12 @@ import {
   updateJumpBuffer,
 } from '../../physics/index.ts'
 import type { Body, SweepResult } from '../../physics/index.ts'
-import { GAMEPLAY_Z, createPlayerCapsule } from '../../render/index.ts'
+import { GAMEPLAY_Z } from '../../render/index.ts'
 import type { Player, PlayerInput, PlayerOptions } from './types.ts'
 
-// The hitbox matches the render capsule's silhouette (radius 0.35, length 0.8), but it is
-// a plain AABB in tile space: the mesh never takes part in collision.
+// The hitbox is a plain AABB in tile space and the mesh never takes part in collision. The
+// T-033 character is built to the same 0.7 x 1.5 silhouette so the art sits inside the box,
+// but it sizes itself from its own MESH_SPAN_* constants below — see the note there.
 /** Hitbox width in tiles. */
 export const PLAYER_WIDTH = 0.7
 /** Hitbox height in tiles. */
@@ -60,13 +63,109 @@ function horizontalIntent(input: PlayerInput): number {
   return (input.right === true ? 1 : 0) - (input.left === true ? 1 : 0)
 }
 
+// T-033 character art. Colours are flat-filled per vertex so ONE material draws the hat,
+// head, overalls and shoes. The mesh has to stay a single Mesh with one geometry and one
+// non-array material: squash and stretch scales the root as a whole, and the disposal idiom
+// this codebase uses on entity meshes is `mesh.geometry.dispose(); mesh.material.dispose()`,
+// which a Group of children would leak straight past.
+const HAT_COLOR = 0xe0392b
+const HEAD_COLOR = 0xe8c547
+const OVERALLS_COLOR = 0x2e5bbf
+const SHOES_COLOR = 0x4a2f1b
+
+/**
+ * The art's own silhouette size, in tiles. Deliberately NOT the PLAYER_WIDTH/PLAYER_HEIGHT
+ * hitbox constants: sizing art off the hitbox means retuning the hitbox silently deforms the
+ * character. They happen to match today, so the character fills the box the capsule did.
+ *
+ * Unscaled by TILE_SIZE, unlike `walker.ts`. `step` positions this mesh in raw tile units
+ * (`body.aabb.x + PLAYER_WIDTH / 2`), so scaling the geometry would decouple the art from
+ * its own placement.
+ */
+const MESH_SPAN_X = 0.7
+const MESH_SPAN_Y = 1.5
+/** Every part is placed relative to the mesh centre, so half spans are what the table needs. */
+const HALF_X = MESH_SPAN_X / 2
+const HALF_Y = MESH_SPAN_Y / 2
+
+/** One flat-coloured box of the character, as local bounds around the mesh centre. */
+interface PlayerPart {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  depth: number
+  color: number
+}
+
+/**
+ * The character, bottom to top, centred on the origin so Y runs -HALF_Y to +HALF_Y and the
+ * feet land on the hitbox bottom once `step` parks the mesh on the AABB centre.
+ *
+ * Two choices carry the read. The hat brim is the widest part and overhangs the head, which
+ * is what makes the top say "hat" rather than "block". And the brim and shoes are front-heavy
+ * in +X: the capsule was rotationally symmetric about Y, so the TURN_RATE lerp in `step` drew
+ * nothing — giving the character a front is what makes the turn visible.
+ *
+ * Neighbours overlap in Y by ~0.02 so no join can open a seam or z-fight.
+ */
+const PLAYER_PARTS: readonly PlayerPart[] = [
+  { minX: -0.2, maxX: HALF_X, minY: -HALF_Y, maxY: -0.59, depth: 0.44, color: SHOES_COLOR },
+  { minX: -0.26, maxX: 0.26, minY: -0.62, maxY: -0.05, depth: 0.4, color: OVERALLS_COLOR },
+  { minX: -0.23, maxX: 0.23, minY: -0.07, maxY: 0.35, depth: 0.42, color: HEAD_COLOR },
+  { minX: -0.24, maxX: HALF_X, minY: 0.33, maxY: 0.45, depth: 0.5, color: HAT_COLOR },
+  { minX: -0.21, maxX: 0.21, minY: 0.43, maxY: HALF_Y, depth: 0.4, color: HAT_COLOR },
+]
+
+/** Flat-fill a geometry's vertices so the merged mesh keeps its parts distinguishable. */
+function paint(geometry: THREE.BufferGeometry, hex: number): void {
+  const { r, g, b } = new THREE.Color(hex)
+  const count = geometry.getAttribute('position').count
+  const colors = new Float32Array(count * 3)
+  for (let i = 0; i < count; i += 1) {
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+}
+
+/**
+ * The player character: a red hat over a head, blue overalls and shoes, merged into ONE
+ * geometry drawn by ONE material. Exported so tests can read the geometry without casting
+ * through the THREE.Object3D that `Player.mesh` is typed as.
+ */
+export function createPlayerMesh(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial> {
+  const boxes = PLAYER_PARTS.map((part) => {
+    const box = new THREE.BoxGeometry(part.maxX - part.minX, part.maxY - part.minY, part.depth)
+    box.translate((part.minX + part.maxX) / 2, (part.minY + part.maxY) / 2, 0)
+    paint(box, part.color)
+    return box
+  })
+
+  // Typed non-null, but the implementation returns null when attribute sets disagree — fail
+  // here rather than handing a null geometry to whatever disposes it later.
+  const merged = mergeGeometries(boxes)
+  if (merged === null) throw new Error('player: character part attributes are incompatible')
+
+  // Only the merged geometry is reachable from here on, so free the sources.
+  for (const box of boxes) box.dispose()
+
+  return new THREE.Mesh(
+    merged,
+    // Left white: Lambert multiplies material.color by the vertex colour, so a tint here
+    // would darken every part of the character at once.
+    new THREE.MeshLambertMaterial({ vertexColors: true }),
+  )
+}
+
 export function createPlayer(options: PlayerOptions): Player {
   const { grid } = options
   const body: Body = {
     aabb: { x: options.x, y: options.y, w: PLAYER_WIDTH, h: PLAYER_HEIGHT },
     velocity: { x: 0, y: 0 },
   }
-  const mesh = options.mesh ?? createPlayerCapsule()
+  const mesh = options.mesh ?? createPlayerMesh()
   const coyote = createCoyoteTimer()
   const jumpBuffer = createJumpBuffer()
   // Reused every step so a 120 Hz sim allocates nothing.
