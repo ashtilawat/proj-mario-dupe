@@ -22,6 +22,7 @@ import {
   UNDERGROUND_SKY_COLOR,
   applyTileArt,
   createBackdrop,
+  createCastleBackdrop,
   createCaveBackdrop,
   createLights,
   tileColorAt,
@@ -600,6 +601,16 @@ export function startGame(
   // out below the frustum floor and an underground level looks exactly as it did before this
   // was wired at all.
   caveBackdrop.position.y = CAMERA_Y
+  // The third and last of the set, wired exactly like the cave above: built once for the whole
+  // run, never rebuilt, shown by one flag in `applyLevel`. `createCastleBackdrop` parks itself at
+  // -20 like both of its neighbours, so depth needs nothing here either.
+  const castleBackdrop = createCastleBackdrop()
+  // The same reconciliation the two above need, for the same reason. T-061 authored the hall
+  // against a camera centred on y = 0 — its wall spans y = ±6 and its arcade stands on a floor at
+  // y = -5.5 — while `followPlayer` parks the live one at CAMERA_Y. Unlifted the wall tops out at
+  // y = 6 under a frustum ceiling of y = 10, and a castle interior comes up with four world units
+  // of bare sky above it.
+  castleBackdrop.position.y = CAMERA_Y
   const player = createPlayer({ x: spawnX, y: spawnY, grid })
   const overlay = createDebugOverlay()
   // Filled by `applyLevel`, never reassigned: these arrays are the ones handed out on Game.
@@ -617,6 +628,7 @@ export function startGame(
     // depth is what keeps it in the back — its place in this list carries no meaning.
     backdrop,
     caveBackdrop,
+    castleBackdrop,
     directional,
     hemisphere,
     player.mesh,
@@ -764,6 +776,10 @@ export function startGame(
     // is what makes the castle — neither grass nor underground — come out with both layers down
     // and no special case anywhere.
     caveBackdrop.visible = level.theme === 'underground'
+    // The third flag, and the one that finally gives the castle theme art of its own. Same shape
+    // as the two above for the same reason: three independent booleans mean no theme needs a
+    // special case here, and a theme none of them names still comes out with all three down.
+    castleBackdrop.visible = level.theme === 'castle'
 
     for (const walker of walkers) {
       walker.mesh.geometry.dispose()
