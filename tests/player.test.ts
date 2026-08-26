@@ -22,6 +22,7 @@ import {
   createPlayer,
 } from '../src/entities/player/index.ts'
 import type { Player, PlayerInput } from '../src/entities/player/index.ts'
+import { BOB_AMPLITUDE } from '../src/entities/player/player.ts'
 
 // Rows are written top-down for readability; tile Y is up, so row 0 is the highest ty.
 // '#' solid, '.' empty.
@@ -307,13 +308,26 @@ describe('player hitbox', () => {
     expect(player.body.aabb.x).toBeCloseTo(restingX, 10)
   })
 
-  test('the mesh follows the hitbox centre', () => {
+  test('the mesh sits bit-exactly on the hitbox centre at rest', () => {
+    const player = onGround()
+
+    stepFor(player, 30)
+
+    expect(player.mesh.position.x).toBe(player.body.aabb.x + PLAYER_WIDTH / 2)
+    expect(player.mesh.position.y).toBe(player.body.aabb.y + PLAYER_HEIGHT / 2)
+  })
+
+  test('the mesh follows the hitbox centre, lifted only by the T-042 walk bob', () => {
     const player = onGround()
 
     stepFor(player, 30, input({ moveX: 1, right: true }))
 
+    // X still tracks the centre exactly: the walk bob is a Y-only visual offset.
     expect(player.mesh.position.x).toBeCloseTo(player.body.aabb.x + PLAYER_WIDTH / 2, 10)
-    expect(player.mesh.position.y).toBeCloseTo(player.body.aabb.y + PLAYER_HEIGHT / 2, 10)
+    // Y is the centre plus the bob, which is bounded and never dips below the rest pose.
+    const lift = player.mesh.position.y - (player.body.aabb.y + PLAYER_HEIGHT / 2)
+    expect(lift).toBeGreaterThanOrEqual(0)
+    expect(lift).toBeLessThanOrEqual(BOB_AMPLITUDE)
   })
 })
 

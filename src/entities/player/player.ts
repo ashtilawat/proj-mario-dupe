@@ -215,6 +215,11 @@ export function createPlayer(options: PlayerOptions): Player {
   let squash = 0
   let targetYaw = FACE_RIGHT
 
+  // Walk bob state. Phase is in radians and carries across frames; amplitude is what fades
+  // the bob out on takeoff instead of popping it to zero mid-stride.
+  let bobPhase = 0
+  let bobAmp = 0
+
   function step(dt: number, input: PlayerInput): void {
     // 1. Arm the buffer on the rising edge, so a tap counts even if nothing can act on it yet.
     if (input.jump && !prevJump) pressJump(jumpBuffer)
@@ -263,11 +268,29 @@ export function createPlayer(options: PlayerOptions): Player {
     player.grounded = sweep.grounded
     updateCoyoteTimer(coyote, player.grounded, dt)
 
+    // 6b. Walk bob. Gated on real speed, not intent: the sweep has already zeroed vx against
+    // a wall, so pushing into one stands still instead of jogging on the spot. Read after the
+    // sweep for the same reason.
+    const speed = Math.abs(velocity.x)
+    const bobbing = player.grounded && speed >= BOB_MIN_SPEED
+    if (player.grounded) bobPhase += ((WALK_MAX * dt) / BOB_STRIDE) * 2 * Math.PI
+    const targetAmp = bobbing ? BOB_AMPLITUDE : 0
+    // moveToward snaps to its target, exactly as the squash recovery below does, so an idle
+    // or airborne mesh settles on a bit-exact zero offset rather than an asymptotic crumb.
+    bobAmp = moveToward(bobAmp, targetAmp, BOB_FADE_RATE * dt)
+    // Park the phase with the amplitude so the next walk starts from the bottom of the cycle.
+    if (bobAmp === 0) bobPhase = 0
+    const bob = walkBobOffset(bobPhase, bobAmp)
+
     // 7. Turn. A lerped Y rotation, so the model swings around rather than flipping.
     if (intent !== 0) targetYaw = intent > 0 ? FACE_RIGHT : FACE_LEFT
     player.facingYaw += (targetYaw - player.facingYaw) * Math.min(1, TURN_RATE * dt)
     mesh.rotation.y = player.facingYaw
-    mesh.position.set(body.aabb.x + PLAYER_WIDTH / 2, body.aabb.y + PLAYER_HEIGHT / 2, GAMEPLAY_Z)
+    mesh.position.set(
+      body.aabb.x + PLAYER_WIDTH / 2,
+      body.aabb.y + PLAYER_HEIGHT / 2 + bob,
+      GAMEPLAY_Z,
+    )
 
     // 8. Squash and stretch. Mesh scale only — the simulation never reads it back.
     if (!wasGrounded && player.grounded) {
