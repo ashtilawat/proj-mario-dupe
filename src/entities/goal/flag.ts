@@ -36,6 +36,23 @@ export const BANNER_WIDTH = 1.15
 export const BANNER_HEIGHT = 0.75
 export const BANNER_DROP = 0.25
 
+/**
+ * T-057 — how the pennant waves. Spans across the pennant, from the pole edge out to the
+ * tip: a triangle drawn as three vertices can only tilt as a rigid plane, so the cloth is
+ * cut into columns the wave can bend between.
+ */
+export const BANNER_SEGMENTS = 12
+
+/**
+ * Ripple depth in tiles, at the tip, where the wave is strongest. Deliberately a fraction
+ * of the pennant's own drop: this is a paper flag catching a draught, not a windsock.
+ */
+export const BANNER_WAVE_AMPLITUDE = 0.06
+
+/** Seconds per flap, and how many crests are on the cloth at once. */
+export const BANNER_WAVE_PERIOD = 1.1
+export const BANNER_WAVE_CRESTS = 1.5
+
 /** Pale steel, so the pole reads against both the sky and the castle theme's dark tiles. */
 export const POLE_COLOR = 0xd8dee6
 
@@ -53,7 +70,9 @@ export class Flag {
   /** Parent for the two pieces, parked on the flag tile's bottom-left corner. */
   readonly mesh: THREE.Group
   readonly pole: THREE.Mesh<THREE.BoxGeometry, THREE.MeshLambertMaterial>
-  readonly banner: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshLambertMaterial>
+  readonly banner: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>
+  /** The flat pennant, kept so every frame bends the cloth from rest, never from itself. */
+  readonly #rest: Float32Array
 
   constructor(spawn: FlagSpawn) {
     this.id = spawn.id ?? 0
@@ -79,8 +98,8 @@ export class Flag {
 
     this.banner = new THREE.Mesh(bannerShape(), new THREE.MeshLambertMaterial({
       color: BANNER_COLOR,
-      // ShapeGeometry is a single flat face. Double-sided so the pennant survives any later
-      // camera or parent flip, for the cost of two extra triangles.
+      // The pennant is a single flat face. Double-sided so it survives any later camera or
+      // parent flip — and so the wave can crest away from the light without going black.
       side: THREE.DoubleSide,
     }))
     // Flush against the pole's -X face, hung just below the top, and pulled forward to the
@@ -93,6 +112,17 @@ export class Flag {
       (POLE_HEIGHT - BANNER_DROP) * TILE_SIZE,
       (POLE_DEPTH / 2) * TILE_SIZE,
     )
+
+    // The wave rides on the render, not on the run loop: main.ts reads flags as hitboxes
+    // and never calls a step on this class, so a step here would simply never be invoked.
+    // `onBeforeRender` is three.js's own per-frame hook and lives on the mesh, which means
+    // it stops the moment `dispose` unparents the group — no listener to unregister.
+    this.#rest = Float32Array.from(
+      (this.banner.geometry.getAttribute('position') as THREE.BufferAttribute).array,
+    )
+    this.banner.onBeforeRender = () => {
+      waveBanner(this.banner.geometry, this.#rest, performance.now())
+    }
 
     this.mesh = new THREE.Group()
     this.mesh.name = 'flag'
@@ -117,14 +147,78 @@ export class Flag {
  * The pennant: a triangle hanging from its top-right corner, tapering to a point back over
  * the ground the player just crossed. Local origin is that corner, so the caller positions
  * it by where it attaches.
+ *
+ * Built by hand rather than from a `Shape`, for one reason: `ShapeGeometry` triangulates
+ * the outline into three vertices, and three vertices cannot ripple. This walks the same
+ * three corners in `BANNER_SEGMENTS` columns, so `waveBanner` has spans to bend.
  */
-function bannerShape(): THREE.ShapeGeometry {
-  const shape = new THREE.Shape()
-  shape.moveTo(0, 0)
-  shape.lineTo(-BANNER_WIDTH * TILE_SIZE, (-BANNER_HEIGHT / 2) * TILE_SIZE)
-  shape.lineTo(0, -BANNER_HEIGHT * TILE_SIZE)
-  shape.closePath()
-  return new THREE.ShapeGeometry(shape)
+function bannerShape(): THREE.BufferGeometry {
+  const width = BANNER_WIDTH * TILE_SIZE
+  const height = BANNER_HEIGHT * TILE_SIZE
+  const position: number[] = []
+  const index: number[] = []
+
+  // Columns from the pole edge outward. Both long edges close on the tip as `t` runs out,
+  // so the outline is the shipped triangle to the last decimal.
+  for (let i = 0; i < BANNER_SEGMENTS; i += 1) {
+    const t = i / BANNER_SEGMENTS
+    position.push(-t * width, (-t * height) / 2, 0)
+    position.push(-t * width, -height + (t * height) / 2, 0)
+  }
+  // The tip is one vertex, not two: a doubled point would leave a zero-area triangle, and
+  // `computeVertexNormals` normalizes that to NaN and blacks the pennant out.
+  const tip = BANNER_SEGMENTS * 2
+  position.push(-width, -height / 2, 0)
+
+  for (let i = 0; i < BANNER_SEGMENTS - 1; i += 1) {
+    const top = i * 2
+    const bottom = top + 1
+    const nextTop = top + 2
+    const nextBottom = top + 3
+    index.push(top, nextTop, nextBottom, top, nextBottom, bottom)
+  }
+  index.push((BANNER_SEGMENTS - 1) * 2, tip, (BANNER_SEGMENTS - 1) * 2 + 1)
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3))
+  geometry.setIndex(index)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+/**
+ * Bend the cloth for one frame. A sine runs out along the pennant, pinned to nothing at
+ * the pole edge and free at the tip: the falloff is the distance from the pole, so the
+ * attached edge is exactly still and the tip swings the full amplitude.
+ *
+ * The displacement is depth-only, which keeps the outline — and so the "stays inside its
+ * tile column" contract the art was built to — true on every frame, not just at rest. The
+ * game's camera is orthographic and looks straight down -Z, so depth alone moves nothing
+ * on screen; the normals are what carry the wave, as light sliding across the paper.
+ */
+function waveBanner(
+  geometry: THREE.BufferGeometry,
+  rest: Float32Array,
+  nowMs: number,
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const width = BANNER_WIDTH * TILE_SIZE
+  const phase = (nowMs / 1000 / BANNER_WAVE_PERIOD) * Math.PI * 2
+
+  for (let i = 0; i < position.count; i += 1) {
+    // Rest X, never the live one: the wave reads its own input, so a long session cannot
+    // drift the pennant off its pole one frame at a time.
+    const reach = -rest[i * 3]! / width
+    position.setZ(
+      i,
+      reach * BANNER_WAVE_AMPLITUDE * TILE_SIZE
+        * Math.sin(reach * BANNER_WAVE_CRESTS * Math.PI * 2 - phase),
+    )
+  }
+
+  position.needsUpdate = true
+  geometry.computeVertexNormals()
+  geometry.getAttribute('normal').needsUpdate = true
 }
 
 /** Factory taking a level spawn point. */
