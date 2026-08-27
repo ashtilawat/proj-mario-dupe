@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { createTileGridFromLevel, startGame, type Game } from '../src/main'
+import { loadLevel } from '../src/levels/index.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -45,8 +46,8 @@ describe('createTileGridFromLevel', () => {
   test('has the level 1-1 dimensions and a 1 world unit tile', () => {
     const grid = createTileGridFromLevel('1-1')
 
-    expect(grid.width).toBe(24)
-    expect(grid.height).toBe(12)
+    expect(grid.width).toBe(loadLevel('1-1').size[0])
+    expect(grid.height).toBe(loadLevel('1-1').size[1])
     expect(grid.tileSize).toBe(1)
   })
 
@@ -62,9 +63,9 @@ describe('createTileGridFromLevel', () => {
     const grid = createTileGridFromLevel('1-1')
 
     expect(grid.getTile(-1, 0)).toBe('empty')
-    expect(grid.getTile(24, 0)).toBe('empty')
+    expect(grid.getTile(grid.width, 0)).toBe('empty')
     expect(grid.getTile(0, -1)).toBe('empty')
-    expect(grid.getTile(0, 12)).toBe('empty')
+    expect(grid.getTile(0, grid.height)).toBe('empty')
   })
 })
 
@@ -105,10 +106,11 @@ describe('startGame', () => {
   test('spawns the player hitbox at the level spawn point', () => {
     const { game } = start()
 
-    expect(game.grid.width).toBe(24)
+    const [spawnX, spawnY] = loadLevel('1-1').spawn
+    expect(game.grid.width).toBe(loadLevel('1-1').size[0])
     expect(game.scene.children).toContain(game.player.mesh)
-    expect(game.player.body.aabb.x).toBeCloseTo(2, 5)
-    expect(game.player.body.aabb.y).toBeCloseTo(1, 5)
+    expect(game.player.body.aabb.x).toBeCloseTo(spawnX, 5)
+    expect(game.player.body.aabb.y).toBeCloseTo(spawnY, 5)
   })
 
   test('ticking the loop renders and does not throw', () => {

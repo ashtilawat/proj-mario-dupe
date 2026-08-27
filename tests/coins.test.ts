@@ -65,31 +65,44 @@ function standOn(game: Game, coin: Coin): void {
   game.player.body.velocity.y = 0
 }
 
+function coinEntities(id: string) {
+  return loadLevel(id).entities.filter((entity) => entity.type === 'coin')
+}
+
 describe('createCoins', () => {
   test('reads one coin per coin entity, on the walker convention', () => {
-    const coins = createCoins(loadLevel('1-3'))
+    const level = loadLevel('1-3')
+    const named = coinEntities('1-3')
+    const coins = createCoins(level)
 
-    expect(coins.map((coin) => [coin.aabb.x, coin.aabb.y])).toEqual([
-      [5, 4],
-      [15, 4],
-      [20, 5],
-      [33, 4],
-      [44, 4],
-    ])
+    expect(coins.map((coin) => [coin.aabb.x, coin.aabb.y])).toEqual(
+      named.map((entity) => [entity.at[0], entity.at[1]]),
+    )
     expect(coins[0]!.aabb.w).toBe(1)
     expect(coins[0]!.aabb.h).toBe(1)
   })
 
   test('ignores level entities that are not coins', () => {
     const level = loadLevel('1-3')
+    const named = coinEntities('1-3')
 
-    // 1-3 carries four walkers and a flag alongside its five coins.
-    expect(level.entities.length).toBeGreaterThan(2)
-    expect(createCoins(level)).toHaveLength(5)
+    // 1-3 carries walkers and a flag alongside its coins.
+    expect(level.entities.length).toBeGreaterThan(named.length)
+    expect(createCoins(level)).toHaveLength(named.length)
   })
 
-  test('gives World 1-1, which has no coins at all, an empty set', () => {
-    expect(createCoins(loadLevel(START_LEVEL))).toEqual([])
+  test('reads World 1-1 coins from its entities', () => {
+    const level = loadLevel(START_LEVEL)
+    const named = coinEntities(START_LEVEL)
+    expect(named.length).toBeGreaterThan(0)
+    expect(createCoins(level)).toHaveLength(named.length)
+  })
+
+  test('gives a level with no coin entities an empty set', () => {
+    const level = loadLevel(START_LEVEL)
+    expect(createCoins({ ...level, entities: level.entities.filter((e) => e.type !== 'coin') })).toEqual(
+      [],
+    )
   })
 })
 
@@ -103,14 +116,14 @@ describe('coins in the scene', () => {
     expect(layer!.scale.x).toBeCloseTo(1 / TILE_SIZE, 10)
   })
 
-  test('starts empty on 1-1 and fills up when a level with coins loads', () => {
+  test('starts 1-1 with its JSON coins and swaps in 1-2 coins on the flag', () => {
     const { game } = start()
-    expect(game.coins).toHaveLength(0)
+    expect(game.coins).toHaveLength(coinEntities(START_LEVEL).length)
 
     takeFlag(game, START_LEVEL)
 
     expect(NEXT_LEVEL[START_LEVEL]).toBe('1-2')
-    expect(game.coins).toHaveLength(1)
+    expect(game.coins).toHaveLength(coinEntities('1-2').length)
     expect(game.scene.getObjectByName('coins')!.children).toContain(game.coins[0]!.mesh)
   })
 
@@ -119,10 +132,10 @@ describe('coins in the scene', () => {
     takeFlag(game, START_LEVEL)
     game.scene.updateMatrixWorld(true)
 
-    // 1-2's coin sits at [12, 5], so the disc centre is (12.5, 5.5).
-    const position = game.coins[0]!.mesh.getWorldPosition(new THREE.Vector3())
-    expect(position.x).toBeCloseTo(12.5, 5)
-    expect(position.y).toBeCloseTo(5.5, 5)
+    const coin = game.coins[0]!
+    const position = coin.mesh.getWorldPosition(new THREE.Vector3())
+    expect(position.x).toBeCloseTo(coin.aabb.x + coin.aabb.w / 2, 5)
+    expect(position.y).toBeCloseTo(coin.aabb.y + coin.aabb.h / 2, 5)
   })
 
   test('swaps the whole coin set out on the next level', () => {
@@ -132,7 +145,7 @@ describe('coins in the scene', () => {
 
     takeFlag(game, '1-2')
 
-    expect(game.coins).toHaveLength(5)
+    expect(game.coins).toHaveLength(coinEntities('1-3').length)
     expect(game.coins).not.toContain(stale)
     expect(game.scene.getObjectByName('coins')!.children).not.toContain(stale.mesh)
   })

@@ -183,14 +183,17 @@ describe('restarting with Enter', () => {
 
     pressEnter(container)
 
-    expect(game.walkers).toHaveLength(1)
-    const walker = game.walkers[0]!
-    expect(walker.alive).toBe(true)
-    expect(walker.stomped).toBe(false)
-    expect(walker.mesh.visible).toBe(true)
-    expect(walker.aabb.x).toBeCloseTo(16, 5)
-    expect(walker.aabb.y).toBeCloseTo(1, 5)
-    expect(walker.dir).toBe(-1)
+    const named = loadLevel(START_LEVEL).entities.filter((entity) => entity.type === 'walker')
+    const first = named[0]!
+    expect(game.walkers).toHaveLength(named.length)
+    const walker = game.walkers.find((w) => w.aabb.x === first.at[0] && w.aabb.y === first.at[1])
+    expect(walker).toBeDefined()
+    expect(walker!.alive).toBe(true)
+    expect(walker!.stomped).toBe(false)
+    expect(walker!.mesh.visible).toBe(true)
+    expect(walker!.aabb.x).toBeCloseTo(first.at[0], 5)
+    expect(walker!.aabb.y).toBeCloseTo(first.at[1], 5)
+    expect(walker!.dir).toBe(first.props?.dir === -1 ? -1 : 1)
   })
 
   test('runs the simulation again once the card is gone', () => {
@@ -275,7 +278,9 @@ describe('the flag', () => {
   test('reads one AABB per flag entity, on the walker convention', () => {
     const flags = createFlags(loadLevel(START_LEVEL))
 
-    expect(flags).toEqual([{ x: 22, y: 1, w: 1, h: 1 }])
+    const flag = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'flag')
+    expect(flag).toBeDefined()
+    expect(flags).toEqual([{ x: flag!.at[0], y: flag!.at[1], w: 1, h: 1 }])
   })
 
   test('chains World 1 from 1-1 to the castle, which leads nowhere', () => {

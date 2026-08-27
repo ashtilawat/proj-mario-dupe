@@ -38,27 +38,31 @@ afterEach(() => {
 })
 
 describe('walker spawning', () => {
-  test('spawns one walker from the 1-1 spawn point, facing the way props say', () => {
+  test('spawns one walker per walker entity from the 1-1 JSON, facing the way props say', () => {
     const { game } = start()
+    const named = loadLevel(START_LEVEL).entities.filter((entity) => entity.type === 'walker')
+    const first = named[0]!
 
-    expect(game.walkers).toHaveLength(1)
-    const walker = game.walkers[0]!
-    expect(walker.aabb.x).toBeCloseTo(16, 5)
-    expect(walker.aabb.y).toBeCloseTo(1, 5)
-    expect(walker.dir).toBe(-1)
-    expect(walker.alive).toBe(true)
+    expect(game.walkers).toHaveLength(named.length)
+    const walker = game.walkers.find((w) => w.aabb.x === first.at[0] && w.aabb.y === first.at[1])
+    expect(walker).toBeDefined()
+    expect(walker!.aabb.x).toBeCloseTo(first.at[0], 5)
+    expect(walker!.aabb.y).toBeCloseTo(first.at[1], 5)
+    expect(walker!.dir).toBe(first.props?.dir === -1 ? -1 : 1)
+    expect(walker!.alive).toBe(true)
   })
 
   test('ignores level entities that are not walkers', () => {
     const { game } = start()
     const level = loadLevel(START_LEVEL)
+    const named = level.entities.filter((entity) => entity.type === 'walker')
+    const flag = level.entities.find((entity) => entity.type === 'flag')
 
-    // 1-1 carries a `flag` entity at [22, 1] alongside the walker; only the walker
-    // may become an enemy.
-    expect(level.entities.length).toBeGreaterThan(1)
-    expect(level.entities.some((entity) => entity.type === 'flag')).toBe(true)
-    expect(game.walkers).toHaveLength(1)
-    expect(game.walkers.some((walker) => walker.aabb.x === 22)).toBe(false)
+    // 1-1 carries a flag (and coins) alongside the walkers; only walkers may become enemies.
+    expect(level.entities.length).toBeGreaterThan(named.length)
+    expect(flag).toBeDefined()
+    expect(game.walkers).toHaveLength(named.length)
+    expect(game.walkers.some((walker) => walker.aabb.x === flag!.at[0])).toBe(false)
   })
 
   test('adds the walker meshes to the scene under a tile-scaled layer', () => {

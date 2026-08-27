@@ -147,8 +147,10 @@ function start(size = { width: 800, height: 400 }) {
 
 /** Walks the player onto the 1-1 flag and runs the step that resolves it. */
 function touchFlag(game: Game): void {
-  game.player.body.aabb.x = 22
-  game.player.body.aabb.y = 1
+  const flag = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'flag')
+  if (!flag) throw new Error('no flag in ' + START_LEVEL)
+  game.player.body.aabb.x = flag.at[0]
+  game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
   // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
   elapseFlagToast(game)
@@ -247,7 +249,9 @@ describe('the flag art in the live scene', () => {
 
   test('leaves the hitbox reader untouched', () => {
     // The pre-T-039 contract, restated: art or no art, a flag is one tile on its `at`.
-    expect(createFlags(loadLevel(START_LEVEL))).toEqual([{ x: 22, y: 1, w: 1, h: 1 }])
+    const flag = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'flag')
+    expect(flag).toBeDefined()
+    expect(createFlags(loadLevel(START_LEVEL))).toEqual([{ x: flag!.at[0], y: flag!.at[1], w: 1, h: 1 }])
   })
 
   test('takes the layer out of the scene on dispose', () => {

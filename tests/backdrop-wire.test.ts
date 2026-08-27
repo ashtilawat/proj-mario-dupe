@@ -8,9 +8,10 @@
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { FRUSTUM_HEIGHT, startGame } from '../src/main'
+import { FRUSTUM_HEIGHT, START_LEVEL, startGame } from '../src/main'
 import type { Game } from '../src/main'
 import { elapseFlagToast } from './helpers/flag-toast.ts'
+import { loadLevel } from '../src/levels/index.ts'
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -69,8 +70,10 @@ function backdropIn(scene: THREE.Scene): THREE.Object3D {
  */
 function touchFlag(game: Game): void {
   const widthBefore = game.grid.width
-  game.player.body.aabb.x = 22
-  game.player.body.aabb.y = 1
+  const flag = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'flag')
+  if (!flag) throw new Error('no flag in ' + START_LEVEL)
+  game.player.body.aabb.x = flag.at[0]
+  game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
   // T-052: the touch only raises the level's line. The swap is on the far side of its beat.
   elapseFlagToast(game)

@@ -16,7 +16,7 @@ import * as THREE from 'three'
 import { START_LEVEL, START_LIVES, startGame } from '../src/main'
 import type { Game } from '../src/main'
 import { elapseFlagToast } from './helpers/flag-toast.ts'
-import type { Level } from '../src/levels/index.ts'
+import { loadLevel, type Level } from '../src/levels/index.ts'
 
 const { WORLD_1_2 } = vi.hoisted(() => ({
   WORLD_1_2: {
@@ -84,8 +84,10 @@ afterEach(() => {
 
 /** Walks the player onto the 1-1 flag and runs the step that resolves it. */
 function touchFlag(game: Game): void {
-  game.player.body.aabb.x = 22
-  game.player.body.aabb.y = 1
+  const flag = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'flag')
+  if (!flag) throw new Error('no flag in ' + START_LEVEL)
+  game.player.body.aabb.x = flag.at[0]
+  game.player.body.aabb.y = flag.at[1]
   game.loop.tick(1 / 120)
   // T-052: the touch raises 1-1's story line and freezes the run behind it. The swap this
   // whole file is about happens when that beat runs out, not on the frame of the touch.
