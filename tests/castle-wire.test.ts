@@ -3,8 +3,9 @@
  *
  * `src/render/castle-backdrop.ts` was built and tested in isolation while reaching nothing on
  * screen; its own header said so. Everything asserted here is main.ts's wiring around it. The
- * arcade itself — pillars, arches, banners, tones — belongs to tests/castle-backdrop.test.ts and
- * is deliberately not re-asserted, and the sky behind it belongs to tests/underground-sky.test.ts.
+ * arcade itself — pillars, arches, banners, tones — belongs to tests/castle-backdrop.test.ts
+ * and is deliberately not re-asserted, and the sky behind it belongs to
+ * tests/underground-sky.test.ts.
  *
  * The grass and underground rows of the matrix are re-asserted here on purpose: they are what the
  * new flag has to leave alone, and tests/cave-wire.test.ts cannot see a castle group at all.
@@ -259,28 +260,31 @@ describe('the castle is where the live camera can see it', () => {
     const [base, top] = spanOf(wall, 'y')
 
     // Containment, not overlap, and that distinction is the whole point of this test. The wall
-    // spans y = ±6 around the group, so an UNLIFTED layer still overlaps the live band [0, 10] —
-    // an overlap assertion would pass against unwired code and be worth nothing. What an unlifted
-    // wall cannot do is reach the ceiling: it stops at y = 6 and leaves four world units of bare
-    // sky over a castle interior.
+    // spans y = ±6 around the group, so an UNLIFTED layer still overlaps the live band [0, 10]
+    // — an overlap assertion would pass against unwired code and be worth nothing. What an
+    // unlifted wall cannot do is reach the ceiling: it stops at y = 6 and leaves four world
+    // units of bare sky over a castle interior.
     expect(base).toBeLessThanOrEqual(floor)
     expect(top).toBeGreaterThanOrEqual(ceiling)
   })
 
-  test('brings every pillar and arch into the visible band', () => {
+  test('springs the arches above the middle of the frame', () => {
     window.location.hash = '#level=1-castle'
     const { game } = start()
     game.loop.tick(1 / 120)
     const [floor, ceiling] = visibleY(game)
+    const midline = (floor + ceiling) / 2
 
-    const arcade = [...castleMeshes(game.scene, 'pillar'), ...castleMeshes(game.scene, 'arch')]
+    const arches = castleMeshes(game.scene, 'arch')
     // Guards the loop: an empty set would make it vacuously true.
-    expect(arcade.length).toBeGreaterThan(0)
-    for (const mesh of arcade) {
-      const [base, top] = spanOf([mesh], 'y')
-      // Real overlap with the band, both ways round.
-      expect(top).toBeGreaterThan(floor)
-      expect(base).toBeLessThan(ceiling)
+    expect(arches.length).toBeGreaterThan(0)
+    for (const arch of arches) {
+      // Crowns, not mere overlap. Every part of this arcade already overlaps the live band
+      // unlifted — the near pillars clear the frustum floor by 0.2 — so an overlap assertion
+      // here passes against unwired code and pins nothing. The crowns are what move: unlifted
+      // they top out at y = 2.8 against a midline of 5, and an arcade the player looks DOWN on
+      // reads as a fence rather than as a hall they are standing inside.
+      expect(spanOf([arch], 'y')[1]).toBeGreaterThan(midline)
     }
   })
 
@@ -314,11 +318,16 @@ describe('the castle rides the camera', () => {
   test('keeps the hall across the whole screen once the camera has travelled', () => {
     window.location.hash = '#level=1-castle'
     const { game } = start(SQUARE_SIZE)
+    // Renders without stepping the simulation, which puts the camera on its left clamp. Reading
+    // `startX` straight off the boot instead would read 0 — the position `boot` parks it at
+    // before `followPlayer` has ever run — and 0 is under the clamp, so the "it moved" guard
+    // below would pass on a camera that never left the clamp at all.
+    game.loop.tick(0)
     const startX = game.app.camera.position.x
 
     // Mid-level, on the floor row, and deliberately clear of everything 1-castle places: the
-    // walker at x = 5, the boss at x = 8, the coin at x = 15 and the flag at x = 17 — the last of
-    // which would swap the level out and take the castle with it.
+    // walker at x = 5, the boss at x = 8, the coin at x = 15 and the flag at x = 17 — the last
+    // of which would swap the level out and take the castle with it.
     game.player.body.aabb.x = 12
     game.player.body.aabb.y = 1
     game.loop.tick(1 / 120)
