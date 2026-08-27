@@ -70,8 +70,11 @@ describe('createCoins', () => {
     const coins = createCoins(loadLevel('1-3'))
 
     expect(coins.map((coin) => [coin.aabb.x, coin.aabb.y])).toEqual([
-      [7, 5],
-      [18, 5],
+      [5, 4],
+      [15, 4],
+      [20, 5],
+      [33, 4],
+      [44, 4],
     ])
     expect(coins[0]!.aabb.w).toBe(1)
     expect(coins[0]!.aabb.h).toBe(1)
@@ -80,9 +83,9 @@ describe('createCoins', () => {
   test('ignores level entities that are not coins', () => {
     const level = loadLevel('1-3')
 
-    // 1-3 carries two walkers and a flag alongside its two coins.
+    // 1-3 carries four walkers and a flag alongside its five coins.
     expect(level.entities.length).toBeGreaterThan(2)
-    expect(createCoins(level)).toHaveLength(2)
+    expect(createCoins(level)).toHaveLength(5)
   })
 
   test('gives World 1-1, which has no coins at all, an empty set', () => {
@@ -129,7 +132,7 @@ describe('coins in the scene', () => {
 
     takeFlag(game, '1-2')
 
-    expect(game.coins).toHaveLength(2)
+    expect(game.coins).toHaveLength(5)
     expect(game.coins).not.toContain(stale)
     expect(game.scene.getObjectByName('coins')!.children).not.toContain(stale.mesh)
   })
