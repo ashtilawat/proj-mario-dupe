@@ -1165,10 +1165,16 @@ export function startGame(
       // group against a half-frustum of ~10, so a pinned layer never runs out sideways. Written
       // unconditionally: two floats is cheaper than asking whether the layer is even up.
       caveBackdrop.position.x = camera.position.x
-      // Same pin, same zero parallax, third time. The hall wall spans x = ±10 around the group
-      // against a half-frustum of ~8.9 at 16:9, so a pinned layer never runs out sideways.
-      // Written unconditionally like the one above it: two floats is cheaper than asking whether
-      // the layer is even up.
+      // Same pin, same zero parallax, third time. Written unconditionally like the one above
+      // it: two floats is cheaper than asking whether the layer is even up.
+      //
+      // Unlike its two neighbours, this layer does NOT cover every viewport. The wall spans
+      // x = ±10 around the group against a half-frustum of FRUSTUM_HEIGHT / 2 * aspect, so it
+      // runs out at an aspect of exactly 2:1 — and a maximised 1920x1080 window is already
+      // ~2.13, an ultrawide 2.33+. Past that, sky shows down both edges of a castle level.
+      // The hills (±15.5) and the cave ([-14.5, 15.5]) have margin to spare; the castle is
+      // the narrow one, and widening it means WALL_WIDTH in src/render/castle-backdrop.ts —
+      // its own ticket, not this one.
       castleBackdrop.position.x = camera.position.x
       debugVelocity.vx = player.body.velocity.x
       debugVelocity.vy = player.body.velocity.y
