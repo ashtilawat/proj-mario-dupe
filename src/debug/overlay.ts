@@ -49,10 +49,10 @@ export function createDebugOverlay(): DebugOverlay {
   const hitboxMaterial = new THREE.LineBasicMaterial({ color: HITBOX_COLOR })
   const velocityMaterial = new THREE.LineBasicMaterial({ color: VELOCITY_COLOR })
 
-  let hitboxesVisible = true
-  let velocityVisible = true
-  hitboxGroup.visible = true
-  velocityGroup.visible = true
+  let hitboxesVisible = false
+  let velocityVisible = false
+  hitboxGroup.visible = false
+  velocityGroup.visible = false
 
   function setBodies(bodies: DebugBody[]): void {
     clearLineGroup(hitboxGroup)

@@ -94,12 +94,12 @@ describe('startGame', () => {
     expect(instanced[0]!.count).toBeGreaterThan(0)
   })
 
-  test('adds the debug overlay group so hitboxes are visible', () => {
+  test('adds the debug overlay group but leaves the hitboxes off', () => {
     const { game } = start()
 
     expect(game.scene.children).toContain(game.overlay.group)
     expect(game.scene.getObjectByName('debug-overlay')).toBe(game.overlay.group)
-    expect(game.overlay.hitboxesVisible).toBe(true)
+    expect(game.overlay.hitboxesVisible).toBe(false)
   })
 
   test('spawns the player hitbox at the level spawn point', () => {

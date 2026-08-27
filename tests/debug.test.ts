@@ -77,10 +77,10 @@ describe('createDebugOverlay', () => {
     overlay.dispose()
   })
 
-  test('defaults hitbox and velocity overlays to visible', () => {
+  test('defaults hitbox and velocity overlays to hidden', () => {
     const overlay = createDebugOverlay()
-    expect(overlay.hitboxesVisible).toBe(true)
-    expect(overlay.velocityVisible).toBe(true)
+    expect(overlay.hitboxesVisible).toBe(false)
+    expect(overlay.velocityVisible).toBe(false)
     overlay.dispose()
   })
 
@@ -89,6 +89,11 @@ describe('createDebugOverlay', () => {
     const body: DebugBody = { aabb: { x: 1, y: 2, w: 3, h: 4 } }
     overlay.setBodies([body])
 
+    const hidden = collect(overlay.group, isHitboxLine)
+    expect(hidden.length).toBeGreaterThanOrEqual(1)
+    expect(hidden.every((line) => line.visible === false)).toBe(true)
+
+    overlay.setHitboxesVisible(true)
     const hitboxes = collect(overlay.group, isHitboxLine)
     expect(hitboxes.length).toBeGreaterThanOrEqual(1)
     expect(hitboxes.every((line) => line.visible)).toBe(true)
@@ -117,6 +122,15 @@ describe('createDebugOverlay', () => {
         velocity: { vx: 3, vy: 4 },
       },
     ])
+
+    const velocitiesBeforeOptIn = collect(overlay.group, isVelocityLine).filter(
+      (line) => line.userData['kind'] === 'velocity' || !(line instanceof THREE.LineLoop),
+    )
+    expect(velocitiesBeforeOptIn.length).toBeGreaterThanOrEqual(1)
+    expect(velocitiesBeforeOptIn.every((line) => line.visible === false)).toBe(true)
+
+    overlay.setHitboxesVisible(true)
+    overlay.setVelocityVisible(true)
 
     const velocities = collect(overlay.group, isVelocityLine).filter(
       (line) => line.userData['kind'] === 'velocity' || !(line instanceof THREE.LineLoop),
