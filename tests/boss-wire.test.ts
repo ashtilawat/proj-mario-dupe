@@ -68,12 +68,15 @@ function reachTheCastle(game: Game): void {
 
 describe('createBosses', () => {
   test('reads one boss per boss entity, with the facing the level asks for', () => {
-    const bosses = createBosses(loadLevel(CASTLE))
+    const level = loadLevel(CASTLE)
+    const spawn = level.entities.find((entity) => entity.type === 'boss')
+    if (!spawn) throw new Error('no boss in ' + CASTLE)
+    const bosses = createBosses(level)
 
     expect(bosses).toHaveLength(1)
     const boss = bosses[0]!
-    expect(boss.aabb.x).toBe(8)
-    expect(boss.aabb.y).toBe(1)
+    expect(boss.aabb.x).toBe(spawn.at[0])
+    expect(boss.aabb.y).toBe(spawn.at[1])
     expect(boss.aabb.w).toBe(BOSS_WIDTH)
     expect(boss.aabb.h).toBe(BOSS_HEIGHT)
     expect(boss.dir).toBe(1)
@@ -115,10 +118,11 @@ describe('bosses in the scene', () => {
     reachTheCastle(game)
     game.scene.updateMatrixWorld(true)
 
-    // Hitbox is [8, 11] x [1, 4] in tiles, so the box centre is (9.5, 2.5).
-    const position = game.bosses[0]!.mesh.getWorldPosition(new THREE.Vector3())
-    expect(position.x).toBeCloseTo(9.5, 5)
-    expect(position.y).toBeCloseTo(2.5, 5)
+    const boss = game.bosses[0]!
+    const position = boss.mesh.getWorldPosition(new THREE.Vector3())
+    // Centre of the live hitbox, in tile units — whatever tile the castle parked it on.
+    expect(position.x).toBeCloseTo(boss.aabb.x + boss.aabb.w / 2, 5)
+    expect(position.y).toBeCloseTo(boss.aabb.y + boss.aabb.h / 2, 5)
   })
 })
 

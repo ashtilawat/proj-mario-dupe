@@ -127,10 +127,10 @@ function countOf(name: string): number {
 
 /** Parks the player on the castle boss's lid, falling, so the next step is a stomp. */
 function dropOnBoss(game: Game): void {
-  // The boss box spans x 8..11 and y 1..4, so this is a fall straight onto its top.
+  const b = game.bosses[0]!.aabb
   const aabb = game.player.body.aabb
-  aabb.x = 9
-  aabb.y = 4
+  aabb.x = b.x + b.w / 2 - aabb.w / 2
+  aabb.y = b.y + b.h
   game.player.body.velocity.x = 0
   game.player.body.velocity.y = -6
 }
@@ -149,8 +149,10 @@ describe('the boss stand-in', () => {
 
     expect(game.bosses).toHaveLength(1)
     const boss = game.bosses[0]!
-    expect(boss.aabb.x).toBeCloseTo(8, 5)
-    expect(boss.aabb.y).toBeCloseTo(1, 5)
+    const spawn = loadLevel('1-castle').entities.find((entity) => entity.type === 'boss')
+    if (!spawn) throw new Error('no boss in 1-castle')
+    expect(boss.aabb.x).toBeCloseTo(spawn.at[0], 5)
+    expect(boss.aabb.y).toBeCloseTo(spawn.at[1], 5)
     expect(boss.dir).toBe(1)
     expect(boss.alive).toBe(true)
   })
@@ -241,9 +243,12 @@ describe('sound effects', () => {
 
   test('plays stomp when a walker is stomped', () => {
     const { game } = start()
+    const walker = loadLevel(START_LEVEL).entities.find((entity) => entity.type === 'walker')
+    if (!walker) throw new Error('no walker in ' + START_LEVEL)
     const aabb = game.player.body.aabb
-    aabb.x = 16.2
-    aabb.y = 2
+    // Slightly inset on the walker's lid, falling, matching the old 16.2 / 2 park on the stub map.
+    aabb.x = walker.at[0] + 0.2
+    aabb.y = walker.at[1] + 1
     game.player.body.velocity.x = 0
     game.player.body.velocity.y = -6
 

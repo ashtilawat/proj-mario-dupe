@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { START_LIVES, startGame, type Game } from '../src/main'
+import { loadLevel } from '../src/levels/index.ts'
+
+const castleW = loadLevel('1-castle').size[0]
+const startW = loadLevel('1-1').size[0]
+const oneThreeW = loadLevel('1-3').size[0]
 
 /** jsdom ships no WebGL; every test drives the real wiring through this stub. */
 function stubRenderer() {
@@ -66,7 +71,7 @@ describe('booting from #level=<id>', () => {
 
     const { game } = start()
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
     expect(game.bosses.length).toBe(1)
   })
 
@@ -83,7 +88,7 @@ describe('booting from #level=<id>', () => {
 
     const { game } = start()
 
-    expect(game.grid.width).toBe(28)
+    expect(game.grid.width).toBe(oneThreeW)
   })
 
   for (const hash of ['', '#', '#foo', '#level=nope', '#level=2-1']) {
@@ -92,7 +97,7 @@ describe('booting from #level=<id>', () => {
 
       const { game } = start()
 
-      expect(game.grid.width).toBe(24)
+      expect(game.grid.width).toBe(startW)
       expect(game.bosses.length).toBe(0)
     })
   }
@@ -101,11 +106,11 @@ describe('booting from #level=<id>', () => {
 describe('hashchange mid-run', () => {
   test('warps to the level the new hash names', () => {
     const { game } = start()
-    expect(game.grid.width).toBe(24)
+    expect(game.grid.width).toBe(startW)
 
     warpTo('#level=1-castle')
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
     expect(game.bosses.length).toBe(1)
   })
 
@@ -115,7 +120,7 @@ describe('hashchange mid-run', () => {
 
     warpTo('#level=1-3')
 
-    expect(game.grid.width).toBe(28)
+    expect(game.grid.width).toBe(oneThreeW)
   })
 
   test('ignores a hash the loader does not know, leaving the level alone', () => {
@@ -127,7 +132,7 @@ describe('hashchange mid-run', () => {
     // T-048: still the castle. A hash naming no level the loader knows is not an instruction
     // to go anywhere — it used to mean START_LEVEL, which is what turned a stripped hash on
     // a warped run into 1-1. Boot still falls back to 1-1; a warp no longer does.
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
   })
 
   test('stops listening once the game is disposed', () => {
@@ -138,7 +143,7 @@ describe('hashchange mid-run', () => {
 
     warpTo('#level=1-3')
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
   })
 })
 
@@ -147,13 +152,13 @@ describe('restart after a hash boot', () => {
     window.location.hash = '#level=1-castle'
     const { container, game } = start()
     pressEnter(container)
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
 
     for (let i = 0; i < START_LIVES; i++) fallInPit(game)
     expect(game.hud.getState().lives).toBe(0)
     pressEnter(container)
 
-    expect(game.grid.width).toBe(24)
+    expect(game.grid.width).toBe(startW)
     expect(game.bosses.length).toBe(0)
   })
 })
@@ -201,7 +206,7 @@ describe('a hash stripped out from under a warped run', () => {
       window.location.hash = ''
     })
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
     expect(game.bosses.length).toBe(1)
   })
 
@@ -211,7 +216,7 @@ describe('a hash stripped out from under a warped run', () => {
 
     stripHash()
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
     expect(game.bosses.length).toBe(1)
   })
 
@@ -230,7 +235,7 @@ describe('a hash stripped out from under a warped run', () => {
 
     pressEnter(container)
 
-    expect(game.grid.width).toBe(18)
+    expect(game.grid.width).toBe(castleW)
     expect(game.bosses.length).toBe(1)
     expect(window.location.hash).toContain('1-castle')
   })
@@ -240,7 +245,7 @@ describe('a hash stripped out from under a warped run', () => {
 
     warpTo('#nonsense')
 
-    expect(game.grid.width).toBe(24)
+    expect(game.grid.width).toBe(startW)
     // 1-1 restores like every other level. A bare bar is what a reload of `/` boots from,
     // and 1-1 is exactly where the GAME OVER card lives — see the card test below.
     expect(window.location.hash).toContain('level=1-1')
@@ -309,7 +314,7 @@ describe('a hash stripped while GAME OVER is up on 1-1', () => {
 
       stripHash()
 
-      expect(game.grid.width).toBe(24)
+      expect(game.grid.width).toBe(startW)
       expect(window.location.hash).toContain('1-1')
     })
   }
